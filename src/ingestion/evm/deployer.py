@@ -65,3 +65,38 @@ def trace_deployer(
         prior_rug_count=prior_rugs,
         linked_scam_addresses=linked,
     )
+
+
+def find_insider_cluster(
+    explorer: Explorer,
+    deployer: str,
+    candidates: list[str],
+    *,
+    max_lookups: int = 10,
+    tx_limit: int = 5,
+) -> list[str]:
+    """Wallets among ``candidates`` whose first incoming value transfer came from the deployer.
+
+    "Organic" holders bought with their own money; wallets the deployer seeded with gas before
+    launch are the deployer's own hands. One explorer call per candidate, so the caller passes
+    only the top-N non-contract holders.
+    """
+    deployer = to_checksum_address(deployer)
+    funded: list[str] = []
+    for wallet in candidates[:max_lookups]:
+        wallet = to_checksum_address(wallet)
+        if wallet == deployer:
+            continue
+        try:
+            txs = explorer.transactions(wallet, ascending=True, limit=tx_limit)
+        except Exception as exc:  # noqa: BLE001 - one failed lookup must not sink the scan
+            log.debug("insider lookup failed for %s: %s", wallet, exc)
+            continue
+        for tx in txs:
+            if tx.sender == wallet:
+                break  # already active before any visible deposit – funded some other way (internal tx, bridge…)
+            if tx.to == wallet and tx.value > 0:
+                if tx.sender == deployer:
+                    funded.append(wallet)
+                break  # only the *first* funding matters
+    return funded

@@ -194,6 +194,43 @@ class ContractInspector(BaseHeuristic):
                 )
             )
 
+        # --- bytecode lineage ------------------------------------------ #
+        rug_matches = [
+            m for m in c.bytecode_matches if m.label == "rug" and ge(m.similarity, self.t.bytecode_similarity_min)
+        ]
+        benign_best = max((m.similarity for m in c.bytecode_matches if m.label == "benign"), default=0.0)
+        if rug_matches:
+            best = max(rug_matches, key=lambda m: (m.identical, m.similarity))
+            if benign_best >= best.similarity:
+                notes.append(
+                    f"bytecode resembles a known rug ({best.similarity:.0%}) but a benign contract matches as well – shared template"
+                )
+            elif best.identical:
+                flags.append(
+                    self._flag(
+                        "BYTECODE_IDENTICAL_TO_KNOWN_RUG",
+                        Severity.CRITICAL,
+                        "Bytecode identical to a known rug",
+                        f"Runtime code hash matches {best.address} on {best.chain.value}, labelled rug – same contract redeployed",
+                        match=best.address,
+                        chain=best.chain.value,
+                        matches=len(rug_matches),
+                    )
+                )
+            else:
+                flags.append(
+                    self._flag(
+                        "BYTECODE_SIMILAR_TO_KNOWN_RUG",
+                        Severity.HIGH,
+                        f"Bytecode {best.similarity:.0%} similar to a known rug",
+                        f"Function-selector set is {best.similarity:.0%} identical to {best.address} on {best.chain.value} (labelled rug)",
+                        match=best.address,
+                        chain=best.chain.value,
+                        similarity=best.similarity,
+                        matches=len(rug_matches),
+                    )
+                )
+
         # --- proxy ----------------------------------------------------- #
         if c.proxy_kind in UPGRADEABLE_PROXIES:
             if not c.implementation_verified:

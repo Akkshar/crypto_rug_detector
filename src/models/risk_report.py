@@ -146,9 +146,24 @@ class FunctionSignature(_Strict):
     hidden: bool = Field(False, description="Not exposed in the verified ABI but present in bytecode / internal calls")
 
 
+class BytecodeMatch(_Strict):
+    """A previously seen contract whose runtime bytecode resembles this one."""
+
+    chain: Chain
+    address: Address
+    label: str = Field(description="'rug' | 'benign' | other label attached in the cache")
+    similarity: Ratio = Field(description="Jaccard similarity of function-selector sets; 1.0 = identical hash")
+    identical: bool = False
+
+
 class ContractMetadata(_Strict):
     name: str | None = None
     symbol: str | None = None
+    code_hash: str | None = Field(
+        None, pattern=r"^0x[0-9a-fA-F]{64}$", description="keccak of metadata-stripped runtime code"
+    )
+    selectors: list[str] = Field(default_factory=list, description="4-byte selectors found in the dispatcher")
+    bytecode_matches: list[BytecodeMatch] = Field(default_factory=list)
     decimals: int = Field(18, ge=0, le=36)
     total_supply: float | None = Field(None, ge=0)
     source_verified: bool = False
@@ -291,6 +306,9 @@ class DeployerProfile(_Strict):
     contracts_deployed: int | None = Field(None, ge=0)
     prior_rug_count: int | None = Field(None, ge=0, description="Linked past tokens flagged as rugs")
     linked_scam_addresses: list[Address] = Field(default_factory=list)
+    funded_wallets: list[Address] = Field(
+        default_factory=list, description="Top holders whose first gas came from the deployer (insider cluster)"
+    )
 
     def age_days(self, now: datetime | None = None) -> float | None:
         if self.first_seen is None:

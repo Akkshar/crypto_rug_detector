@@ -32,8 +32,7 @@ def ts(day: int) -> datetime:
     return datetime(2026, 10, day, tzinfo=timezone.utc)
 
 
-@pytest.fixture
-def chain() -> FakeEvmClient:
+def build_chain() -> FakeEvmClient:
     c = FakeEvmClient(chain_id=1, latest_block=100)
     c.with_code(TOKEN, b"\x60\x80" + function_signature_to_4byte_selector("setSellFee(uint256)"))
     c.returns(abi.erc20_name(TOKEN), "SafeMoonElon2.0")
@@ -70,7 +69,11 @@ def chain() -> FakeEvmClient:
 
 
 @pytest.fixture
-def explorer() -> FakeExplorer:
+def chain() -> FakeEvmClient:
+    return build_chain()
+
+
+def build_explorer() -> FakeExplorer:
     ex = FakeExplorer()
     ex.sources[TOKEN] = ContractSource(
         verified=True, contract_name="SafeMoonElon", compiler_version="v0.8.19", abi=[], source=HONEYPOT_SOURCE
@@ -100,6 +103,11 @@ def explorer() -> FakeExplorer:
         ),
     ]
     return ex
+
+
+@pytest.fixture
+def explorer() -> FakeExplorer:
+    return build_explorer()
 
 
 def make_provider(chain, explorer=None, **kw) -> RPCDataProvider:

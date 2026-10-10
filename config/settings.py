@@ -117,6 +117,8 @@ class Thresholds(_Cfg):
     single_whale: float = Field(0.2, ge=0, le=1)
     fresh_deployer_days: float = Field(7, ge=0)
     serial_launcher_count: int = Field(10, ge=1)
+    insider_cluster_share: float = Field(0.1, ge=0, le=1)
+    bytecode_similarity_min: float = Field(0.9, ge=0, le=1)
 
     @model_validator(mode="after")
     def _ordered(self) -> Thresholds:

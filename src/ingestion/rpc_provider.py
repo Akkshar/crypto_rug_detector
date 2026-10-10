@@ -31,12 +31,14 @@ from src.ingestion.base import BaseDataProvider, ProviderError
 from src.ingestion.evm import abi
 from src.ingestion.evm.capabilities import Capabilities, analyse_abi, analyse_source, merge, probe_bytecode
 from src.ingestion.evm.client import EvmClient, Web3EvmClient
-from src.ingestion.evm.deployer import trace_deployer
+from src.ingestion.evm.deployer import find_insider_cluster, trace_deployer
 from src.ingestion.evm.explorer import EtherscanClient, Explorer
+from src.ingestion.evm.fingerprint import fingerprint
 from src.ingestion.evm.pools import PoolDiscovery
 from src.ingestion.evm.simulate import SellSimulator
 from src.models.risk_report import (
     BURN_ADDRESSES,
+    BytecodeMatch,
     Chain,
     ContractMetadata,
     Holder,
@@ -51,6 +53,7 @@ log = logging.getLogger("rugscan.rpc")
 ClientFactory = Callable[[Chain], EvmClient]
 ExplorerFactory = Callable[[Chain], Explorer | None]
 PriorRugLookup = Callable[[str], tuple[int | None, list[str]]]
+SimilarityLookup = Callable[..., list[dict[str, Any]]]  # (code_hash, selectors, min_similarity=) -> matches
 
 SAFE_SINGLETON_CODE_MARKERS = (b"\x5a\xf4",)  # delegatecall-based proxies (Gnosis Safe, minimal proxies)
 
@@ -66,6 +69,7 @@ class RPCDataProvider(BaseDataProvider):
         client_factory: ClientFactory | None = None,
         explorer_factory: ExplorerFactory | None = None,
         prior_rug_lookup: PriorRugLookup | None = None,
+        similarity_lookup: SimilarityLookup | None = None,
         simulate_sells: bool = True,
     ):
         self.settings = settings or get_settings()
@@ -74,6 +78,7 @@ class RPCDataProvider(BaseDataProvider):
         self._client_factory = client_factory or self._default_client
         self._explorer_factory = explorer_factory or self._default_explorer
         self._prior_rug_lookup = prior_rug_lookup
+        self._similarity_lookup = similarity_lookup
         self.simulate_sells = simulate_sells
         self._clients: dict[Chain, EvmClient] = {}
 
@@ -132,6 +137,14 @@ class RPCDataProvider(BaseDataProvider):
         explorer = self._safe(lambda: self._explorer_factory(chain), "explorer init")
         source = self._safe(lambda: explorer.get_source(token) if explorer else None, "source lookup")
         caps = self._capabilities(code, source)
+        fp = fingerprint(code)
+        matches: list[BytecodeMatch] = []
+        similarity = self._similarity_lookup
+        if similarity is not None:
+            raw_matches = self._safe(
+                lambda: similarity(fp.code_hash, fp.selectors, min_similarity=0.5), "bytecode similarity"
+            )
+            matches = [BytecodeMatch.model_validate(m) for m in raw_matches or [] if m.get("address") != token]
 
         deployer = None
         if explorer is not None:
@@ -154,6 +167,12 @@ class RPCDataProvider(BaseDataProvider):
         holders = (
             self._safe(lambda: self._holders(discovery, token, pools, cfg), "holder replay") or HolderDistribution()
         )
+        if deployer is not None and explorer is not None and holders.top_holders:
+            candidates = [h.address for h in holders.circulating_top_n(10) if not h.is_contract]
+            deployer_addr, ex = deployer.address, explorer
+            funded = self._safe(lambda: find_insider_cluster(ex, deployer_addr, candidates), "insider cluster")
+            if funded:
+                deployer = deployer.model_copy(update={"funded_wallets": funded})
 
         sell_sim = None
         if self.simulate_sells and pools:
@@ -196,6 +215,9 @@ class RPCDataProvider(BaseDataProvider):
             can_pause_trading=caps.can_pause_trading,
             has_selfdestruct=caps.has_selfdestruct,
             has_delegatecall=caps.has_delegatecall,
+            code_hash=fp.code_hash,
+            selectors=sorted(fp.selectors),
+            bytecode_matches=matches,
         )
         return TokenSnapshot(
             chain=chain,

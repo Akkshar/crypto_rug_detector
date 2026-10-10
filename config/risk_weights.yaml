@@ -63,6 +63,8 @@ thresholds:
   # deployer
   fresh_deployer_days: 7
   serial_launcher_count: 10
+  insider_cluster_share: 0.1        # combined share of deployer-funded top holders that triggers a flag
+  bytecode_similarity_min: 0.9      # selector-set Jaccard needed to call two contracts "the same template"
 
 flags:
   # --- Contract & privilege (contract_inspector) ---
@@ -81,6 +83,8 @@ flags:
   PROXY_UPGRADE_NO_TIMELOCK: 10
   SELFDESTRUCT_CAPABILITY: 15
   EXTERNAL_DELEGATECALL: 10
+  BYTECODE_IDENTICAL_TO_KNOWN_RUG: 30
+  BYTECODE_SIMILAR_TO_KNOWN_RUG: 20
   # --- Declared taxes (contract_inspector, HONEYPOT category) ---
   SELL_TAX_EXTREME: 40
   SELL_TAX_HIGH: 20
@@ -107,6 +111,7 @@ flags:
   TOP10_CONCENTRATION_HIGH: 20
   TOP10_CONCENTRATION_ELEVATED: 8
   SINGLE_WHALE_DOMINANT: 10
+  INSIDER_CLUSTER_HOLDINGS: 15
   # --- Deployer (deployer_tracer) ---
   DEPLOYER_MIXER_FUNDED: 25
   DEPLOYER_PRIVACY_EXCHANGE_FUNDED: 15

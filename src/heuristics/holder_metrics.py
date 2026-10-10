@@ -73,4 +73,23 @@ class HolderMetrics(BaseHeuristic):
                         label=whale.label,
                     )
                 )
+        funded = {a for a in (snapshot.deployer.funded_wallets if snapshot.deployer else [])}
+        if funded:
+            cluster = [h for h in dist.top_holders if h.address in funded and not h.is_dex_or_burn]
+            cluster_share = min(1.0, sum(h.share for h in cluster) / circulating) if cluster else 0.0
+            if cluster and ge(cluster_share, self.t.insider_cluster_share):
+                flags.append(
+                    self._flag(
+                        "INSIDER_CLUSTER_HOLDINGS",
+                        Severity.HIGH,
+                        f"Deployer-funded wallets hold {cluster_share:.0%} of circulating supply",
+                        f"{len(cluster)} top holder(s) received their first gas from the deployer and together control "
+                        f"{cluster_share:.0%} – a coordinated insider cluster, not organic distribution",
+                        wallets=[h.address for h in cluster],
+                        cluster_share=round(cluster_share, 4),
+                    )
+                )
+            elif cluster:
+                notes.append(f"{len(cluster)} deployer-funded wallet(s) among top holders ({cluster_share:.1%})")
+
         return self._result(flags, notes=notes)

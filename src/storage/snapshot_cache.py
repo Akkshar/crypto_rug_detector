@@ -20,6 +20,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from eth_utils import to_checksum_address
 
@@ -247,6 +248,45 @@ class SnapshotCache:
         linked = [r["address"] for r in rows]
         has_labels = self._conn.execute("SELECT 1 FROM snapshots WHERE label IS NOT NULL LIMIT 1").fetchone()
         return (len(linked) if has_labels else None), linked
+
+    def similar_contracts(
+        self,
+        code_hash: str | None,
+        selectors: frozenset[str] | set[str],
+        *,
+        min_similarity: float = 0.5,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Labelled contracts whose bytecode resembles the given fingerprint.
+
+        Returns dicts shaped like ``BytecodeMatch`` (chain, address, label, similarity, identical),
+        best match first. Exact code-hash matches are reported as identical with similarity 1.0.
+        """
+        rows = self._conn.execute(
+            "SELECT chain, address, label, json_extract(payload, '$.contract.code_hash') AS code_hash, "
+            "json_extract(payload, '$.contract.selectors') AS selectors "
+            "FROM snapshots WHERE label IS NOT NULL AND json_extract(payload, '$.contract.selectors') IS NOT NULL "
+            "GROUP BY chain, address"
+        ).fetchall()
+        matches: list[dict[str, Any]] = []
+        mine = set(selectors)
+        for row in rows:
+            theirs = set(json.loads(row["selectors"]) or [])
+            identical = bool(code_hash) and row["code_hash"] == code_hash
+            union = mine | theirs
+            sim = 1.0 if identical else (len(mine & theirs) / len(union) if union else 0.0)
+            if sim >= min_similarity:
+                matches.append(
+                    {
+                        "chain": row["chain"],
+                        "address": row["address"],
+                        "label": row["label"],
+                        "similarity": round(sim, 4),
+                        "identical": identical,
+                    }
+                )
+        matches.sort(key=lambda m: (-float(m["identical"]), -m["similarity"]))
+        return matches[:limit]
 
     def stats(self) -> dict[str, int]:
         q = self._conn.execute

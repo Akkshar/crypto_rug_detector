@@ -83,7 +83,11 @@ def _make_provider(
         from src.ingestion.rpc_provider import RPCDataProvider
 
         # Labelled rugs in the cache feed DeployerProfile.prior_rug_count for live scans.
-        provider = RPCDataProvider(settings, prior_rug_lookup=cache.prior_rugs_by_deployer if cache else None)
+        provider = RPCDataProvider(
+            settings,
+            prior_rug_lookup=cache.prior_rugs_by_deployer if cache else None,
+            similarity_lookup=cache.similar_contracts if cache else None,
+        )
         chain = chain or Chain.ETHEREUM
         if not asyncio.run(provider.supports(chain)):
             raise ProviderError(f"no RPC URL configured for {chain.value}; set RUGSCAN_{chain.value.upper()}_RPC_URL")
