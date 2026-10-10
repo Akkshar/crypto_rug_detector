@@ -96,7 +96,7 @@ class _CountingProvider:
     async def supports(self, chain):
         return True
 
-    async def fetch_snapshot(self, chain, address):
+    async def fetch_snapshot(self, chain, address, *, block=None):
         self.calls += 1
         return self.snapshot.model_copy(update={"observed_at": datetime.now(timezone.utc)})
 

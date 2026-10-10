@@ -25,8 +25,12 @@ class BaseDataProvider(ABC):
     name: str = "base"
 
     @abstractmethod
-    async def fetch_snapshot(self, chain: Chain, address: str) -> TokenSnapshot:
-        """Return a validated snapshot or raise :class:`SnapshotNotFound`."""
+    async def fetch_snapshot(self, chain: Chain, address: str, *, block: int | None = None) -> TokenSnapshot:
+        """Return a validated snapshot or raise :class:`SnapshotNotFound`.
+
+        ``block`` pins the observation to a historical block where the provider
+        supports it (live RPC); offline providers may ignore it.
+        """
 
     async def supports(self, chain: Chain) -> bool:
         """Whether this provider can serve the given chain. Defaults to True."""

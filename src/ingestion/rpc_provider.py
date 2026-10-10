@@ -110,15 +110,18 @@ class RPCDataProvider(BaseDataProvider):
         return self._injected_client or self.settings.rpc_url(chain) is not None
 
     # ------------------------------------------------------------------ #
-    async def fetch_snapshot(self, chain: Chain, address: str) -> TokenSnapshot:
-        return await asyncio.to_thread(self.fetch_sync, chain, address)
+    async def fetch_snapshot(self, chain: Chain, address: str, *, block: int | None = None) -> TokenSnapshot:
+        return await asyncio.to_thread(self.fetch_sync, chain, address, block)
 
-    def fetch_sync(self, chain: Chain, address: str) -> TokenSnapshot:
+    def fetch_sync(self, chain: Chain, address: str, block: int | None = None) -> TokenSnapshot:
         chain = Chain(chain)
         client = self._client(chain)
+        if block is not None:
+            client = client.at(block)  # every read below is pinned → snapshot "as of" that block
         cfg = self.registry.get(chain)
         token = to_checksum_address(address)
-        now = datetime.now(timezone.utc)
+        block_number = client.block_number()
+        now = (client.block_timestamp() if block is not None else None) or datetime.now(timezone.utc)
 
         code = client.get_code(token)
         if not code:
@@ -198,6 +201,7 @@ class RPCDataProvider(BaseDataProvider):
             chain=chain,
             address=token,
             observed_at=now,
+            block_number=block_number,
             price_usd=price_usd,
             contract=contract,
             pools=pools,
@@ -218,21 +222,23 @@ class RPCDataProvider(BaseDataProvider):
             return None
 
     def _erc20_metadata(self, client: EvmClient, token: str) -> dict[str, Any]:
-        def read(call: abi.Call) -> Any:
-            raw = client.try_call(call)
-            if raw is None:
-                return None
+        calls = [
+            abi.erc20_name(token),
+            abi.erc20_symbol(token),
+            abi.erc20_decimals(token),
+            abi.erc20_total_supply(token),
+        ]
+        values: list[Any] = []
+        for call, raw in zip(calls, client.call_many(calls), strict=True):
             try:
-                return call.one(raw)
-            except Exception:  # noqa: BLE001
-                return None
-
-        decimals = read(abi.erc20_decimals(token))
+                values.append(call.one(raw) if raw else None)
+            except Exception:  # noqa: BLE001 - non-standard return encodings (bytes32 names etc.)
+                values.append(None)
+        name, symbol, decimals, supply_raw = values
         decimals = int(decimals) if decimals is not None else 18
-        supply_raw = read(abi.erc20_total_supply(token))
         return {
-            "name": read(abi.erc20_name(token)),
-            "symbol": read(abi.erc20_symbol(token)),
+            "name": name,
+            "symbol": symbol,
             "decimals": decimals,
             "total_supply": supply_raw / 10**decimals if supply_raw is not None else None,
         }
@@ -271,17 +277,21 @@ class RPCDataProvider(BaseDataProvider):
             "buy": ("buyTax()", "_buyTax()", "buyFee()", "_buyFee()", "totalBuyTax()", "buyTotalFees()", "taxFee()"),
             "sell": ("sellTax()", "_sellTax()", "sellFee()", "_sellFee()", "totalSellTax()", "sellTotalFees()"),
         }
+        calls = [
+            (side, abi.Call(token, name, returns=("uint256",))) for side, names in getters.items() for name in names
+        ]
+        results = client.call_many([c for _, c in calls])
         out: dict[str, float] = {}
-        for side, names in getters.items():
-            for name in names:
-                raw = client.try_call(abi.Call(token, name, returns=("uint256",)))
-                if raw is None:
-                    continue
-                value = int(abi.Call(token, name, returns=("uint256",)).one(raw))
-                pct = float(value) if value <= 100 else value / 100.0 if value <= 10_000 else None
-                if pct is not None:
-                    out[side] = min(100.0, pct)
-                    break
+        for (side, call), raw in zip(calls, results, strict=True):
+            if raw is None or side in out:
+                continue
+            try:
+                value = int(call.one(raw))
+            except Exception:  # noqa: BLE001
+                continue
+            pct = float(value) if value <= 100 else value / 100.0 if value <= 10_000 else None
+            if pct is not None:
+                out[side] = min(100.0, pct)
         return out
 
     @staticmethod

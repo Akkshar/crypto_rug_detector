@@ -209,5 +209,25 @@ def test_supports_depends_on_rpc_url(chain):
     assert asyncio.run(RPCDataProvider(SETTINGS, registry=REG).supports(Chain.BASE)) is False
 
 
+def test_time_travel_snapshot_excludes_later_logs(chain, explorer):
+    chain.timestamps[10] = ts(9)
+    provider = make_provider(chain, explorer)
+    at_launch = provider.fetch_sync(Chain.ETHEREUM, TOKEN, block=10)  # before the HOLDER_A transfer at block 11
+    assert at_launch.block_number == 10 and at_launch.observed_at == ts(9)
+    assert {h.address for h in at_launch.holders.top_holders} == {DEPLOYER, PAIR}
+    assert at_launch.holders.holder_count == 2
+
+    latest = provider.fetch_sync(Chain.ETHEREUM, TOKEN)
+    assert latest.block_number == 100 and latest.holders.holder_count == 3
+    assert chain.block is None  # the provider pinned a clone, not the shared client
+
+
+def test_metadata_and_taxes_are_batched(chain):
+    chain.batches.clear()
+    make_provider(chain).fetch_sync(Chain.ETHEREUM, TOKEN)
+    # metadata (4), declared-tax getters (13), factory probes, pool state – no per-call fan-out
+    assert 4 in chain.batches and 13 in chain.batches and len(chain.batches) >= 4
+
+
 def test_abi_encoding_roundtrip():
     assert abi.decode(("uint256[]",), encode(["uint256[]"], [[1, 2]])) == ((1, 2),)

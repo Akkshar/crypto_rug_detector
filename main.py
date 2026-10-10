@@ -99,9 +99,10 @@ def _build_snapshot(
     fixtures: Path | None,
     cache: SnapshotCache | None = None,
     max_age: timedelta | None = None,
+    block: int | None = None,
 ) -> tuple[BaseDataProvider, TokenSnapshot]:
     provider, chain, target = _make_provider(provider_kind, target, chain, fixtures, cache, max_age)
-    return provider, asyncio.run(provider.fetch_snapshot(chain, target))
+    return provider, asyncio.run(provider.fetch_snapshot(chain, target, block=block))
 
 
 @app.command()
@@ -116,6 +117,10 @@ def analyze(
     fail_on: Annotated[RiskTier | None, typer.Option(help="Exit 1 if the tier is at or above this")] = None,
     cache: Annotated[Path | None, typer.Option(help="SQLite cache for snapshots + report history")] = None,
     max_age: Annotated[int | None, typer.Option(help="Reuse a cached snapshot younger than this many seconds")] = None,
+    at_block: Annotated[
+        int | None,
+        typer.Option("--at-block", help="Observe the token as of this block (live provider; needs archive node)"),
+    ] = None,
     log_level: Annotated[str, typer.Option(help="DEBUG / INFO / WARNING / ERROR")] = "INFO",
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Suppress [FLAG] explanation logs")] = False,
 ) -> None:
@@ -127,7 +132,7 @@ def analyze(
     try:
         config = load_risk_config(weights)
         data_provider, snapshot = _build_snapshot(
-            provider, target, chain, fixtures, store, timedelta(seconds=max_age) if max_age else None
+            provider, target, chain, fixtures, store, timedelta(seconds=max_age) if max_age else None, at_block
         )
     except (SnapshotNotFound, ProviderError, FileNotFoundError, ValueError) as exc:
         err.print(f"[bold red]error:[/bold red] {exc}")

@@ -47,8 +47,8 @@ class MockDataProvider(BaseDataProvider):
                 return snapshot
         raise SnapshotNotFound(f"no fixture for {key!r}; available: {sorted(self._by_name)}")
 
-    async def fetch_snapshot(self, chain: Chain, address: str) -> TokenSnapshot:
-        snapshot = self.resolve(address)
+    async def fetch_snapshot(self, chain: Chain, address: str, *, block: int | None = None) -> TokenSnapshot:
+        snapshot = self.resolve(address)  # fixtures are static – `block` is accepted but ignored
         if snapshot.chain != chain:
             raise SnapshotNotFound(f"fixture for {address} is on {snapshot.chain}, not {chain}")
         # Return a copy so callers mutating the snapshot can't poison the cache.

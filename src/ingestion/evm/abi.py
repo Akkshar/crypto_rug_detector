@@ -113,3 +113,22 @@ def v3_liquidity(pool: str) -> Call:
 
 def v2_router_get_amounts_out(router: str, amount_in: int, path: list[str]) -> Call:
     return Call(router, "getAmountsOut(uint256,address[])", (amount_in, path), returns=("uint256[]",))
+
+
+# Multicall3 ------------------------------------------------------------------
+
+#: Same address on Ethereum, BSC, Arbitrum, Base and most other EVM chains.
+MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11"
+AGGREGATE3_SIG = "aggregate3((address,bool,bytes)[])"
+
+
+def encode_aggregate3(calls: list[Call]) -> bytes:
+    """Batch many read-only calls into one ``aggregate3`` call (every sub-call may fail)."""
+    tuples = [(to_checksum_address(c.to), True, c.data) for c in calls]
+    return selector(AGGREGATE3_SIG) + _abi_encode(["(address,bool,bytes)[]"], [tuples])
+
+
+def decode_aggregate3(raw: bytes) -> list[bytes | None]:
+    """``(bool success, bytes returnData)[]`` → return data, or ``None`` for failed/empty sub-calls."""
+    (results,) = _abi_decode(["(bool,bytes)[]"], raw)
+    return [bytes(data) if ok and data else None for ok, data in results]

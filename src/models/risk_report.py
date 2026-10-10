@@ -306,6 +306,7 @@ class TokenSnapshot(_Strict):
     chain: Chain
     address: Address
     observed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    block_number: int | None = Field(None, ge=0, description="Block the observation was pinned to (live provider)")
     price_usd: float | None = Field(None, ge=0)
     contract: ContractMetadata
     pools: list[LiquidityPool] = Field(default_factory=list)

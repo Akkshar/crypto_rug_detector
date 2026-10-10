@@ -271,13 +271,13 @@ class CachingProvider(BaseDataProvider):
     async def supports(self, chain: Chain) -> bool:
         return await self.inner.supports(chain)
 
-    async def fetch_snapshot(self, chain: Chain, address: str) -> TokenSnapshot:
-        if self.max_age is not None:
+    async def fetch_snapshot(self, chain: Chain, address: str, *, block: int | None = None) -> TokenSnapshot:
+        if self.max_age is not None and block is None:  # historical reads are never served from "latest"
             cached = self.cache.get_latest(chain, address, self.max_age)
             if cached is not None:
                 self.last_hit = True
                 return cached
         self.last_hit = False
-        snapshot = await self.inner.fetch_snapshot(chain, address)
+        snapshot = await self.inner.fetch_snapshot(chain, address, block=block)
         self.cache.put_snapshot(snapshot, self.inner.name)
         return snapshot

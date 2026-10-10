@@ -109,6 +109,12 @@ def test_watch_mock_runs_fixed_iterations(tmp_path: Path):
     assert runner.invoke(app, ["watch", "nope", "--iterations", "1"]).exit_code == 2
 
 
+def test_at_block_is_accepted_by_mock_provider():
+    result = runner.invoke(app, ["analyze", "sample_benign_token", "--json", "-q", "--at-block", "123"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["risk_tier"] == "LOW"
+
+
 def test_list_fixtures_and_weights():
     assert "sample_honeypot" in runner.invoke(app, ["list-fixtures"]).stdout
     weights = runner.invoke(app, ["weights"])

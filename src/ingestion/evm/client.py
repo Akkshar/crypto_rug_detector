@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from typing import Any, Protocol
 
 from eth_utils import to_checksum_address
 
-from src.ingestion.evm.abi import Call
+from src.ingestion.evm.abi import AGGREGATE3_SIG, MULTICALL3, Call, decode_aggregate3, encode_aggregate3
 
 log = logging.getLogger("rugscan.evm")
 
@@ -53,14 +54,22 @@ StateOverride = Mapping[str, Mapping[str, Any]]
 
 class EvmClient(Protocol):
     chain_id: int
+    #: When set, every read is pinned to this block (time-travel snapshots).
+    block: int | None
 
     def call(self, call: Call, *, state_override: StateOverride | None = None, sender: str | None = None) -> bytes: ...
 
     def try_call(self, call: Call) -> bytes | None: ...
 
+    def call_many(self, calls: list[Call]) -> list[bytes | None]: ...
+
     def get_code(self, address: str) -> bytes: ...
 
     def block_number(self) -> int: ...
+
+    def block_timestamp(self, block: int | None = None) -> datetime | None: ...
+
+    def at(self, block: int | None) -> EvmClient: ...
 
     def get_logs(
         self, address: str, topics: list[bytes | None], from_block: int, to_block: int | str
@@ -77,9 +86,30 @@ class EvmClient(Protocol):
 
 
 class Web3EvmClient:
-    def __init__(self, w3: Any, chain_id: int | None = None):
+    MULTICALL_CHUNK = 200
+
+    def __init__(
+        self,
+        w3: Any,
+        chain_id: int | None = None,
+        *,
+        block: int | None = None,
+        multicall: str | None = MULTICALL3,
+    ):
         self.w3 = w3
         self.chain_id = chain_id if chain_id is not None else int(w3.eth.chain_id)
+        self.block = block
+        self.multicall = multicall
+        self._multicall_ok: bool | None = None
+
+    @property
+    def _block_id(self) -> int | str:
+        return self.block if self.block is not None else "latest"
+
+    def at(self, block: int | None) -> Web3EvmClient:
+        clone = Web3EvmClient(self.w3, self.chain_id, block=block, multicall=self.multicall)
+        clone._multicall_ok = self._multicall_ok
+        return clone
 
     def call(self, call: Call, *, state_override: StateOverride | None = None, sender: str | None = None) -> bytes:
         tx: dict[str, Any] = {"to": to_checksum_address(call.to), "data": call.data}
@@ -89,8 +119,8 @@ class Web3EvmClient:
             tx["value"] = call.value
         try:
             if state_override:
-                return bytes(self.w3.eth.call(tx, "latest", state_override))
-            return bytes(self.w3.eth.call(tx))
+                return bytes(self.w3.eth.call(tx, self._block_id, state_override))
+            return bytes(self.w3.eth.call(tx, self._block_id))
         except Exception as exc:
             raise CallReverted(call, str(exc)) from exc
 
@@ -101,15 +131,50 @@ class Web3EvmClient:
             return None
         return raw or None
 
+    def call_many(self, calls: list[Call]) -> list[bytes | None]:
+        """One Multicall3 round-trip per 200 calls; falls back to sequential calls when unavailable."""
+        if not calls:
+            return []
+        if self._multicall_ok is None:
+            self._multicall_ok = bool(self.multicall) and bool(self.get_code(self.multicall or ""))
+            if not self._multicall_ok:
+                log.info("Multicall3 not available on chain %s – using sequential eth_call", self.chain_id)
+        if not self._multicall_ok:
+            return [self.try_call(c) for c in calls]
+        out: list[bytes | None] = []
+        for start in range(0, len(calls), self.MULTICALL_CHUNK):
+            chunk = calls[start : start + self.MULTICALL_CHUNK]
+            batch = Call(self.multicall or MULTICALL3, AGGREGATE3_SIG)
+            try:
+                raw = bytes(self.w3.eth.call({"to": batch.to, "data": encode_aggregate3(chunk)}, self._block_id))
+                out.extend(decode_aggregate3(raw))
+            except Exception as exc:  # noqa: BLE001 - degrade to sequential rather than fail the scan
+                log.warning("multicall batch failed (%s); retrying sequentially", exc)
+                out.extend(self.try_call(c) for c in chunk)
+        return out
+
     def get_code(self, address: str) -> bytes:
-        return bytes(self.w3.eth.get_code(to_checksum_address(address)))
+        return bytes(self.w3.eth.get_code(to_checksum_address(address), self._block_id))
 
     def block_number(self) -> int:
-        return int(self.w3.eth.block_number)
+        return self.block if self.block is not None else int(self.w3.eth.block_number)
+
+    def block_timestamp(self, block: int | None = None) -> datetime | None:
+        target = block if block is not None else self._block_id
+        try:
+            ts = int(self.w3.eth.get_block(target)["timestamp"])
+        except Exception as exc:  # noqa: BLE001
+            log.debug("block timestamp lookup failed: %s", exc)
+            return None
+        return datetime.fromtimestamp(ts, tz=timezone.utc)
 
     def get_logs(
         self, address: str, topics: list[bytes | None], from_block: int, to_block: int | str
     ) -> list[LogEntry]:
+        if self.block is not None and (to_block == "latest" or int(to_block) > self.block):
+            to_block = self.block
+        if isinstance(to_block, int) and from_block > to_block:
+            return []
         raw = self.w3.eth.get_logs(
             {
                 "address": to_checksum_address(address),
@@ -180,7 +245,10 @@ class FakeEvmClient:
     transactions: dict[str, TxInfo] = field(default_factory=dict)
     gas: dict[tuple[str, str], int] = field(default_factory=dict)
     latest_block: int = 20_000_000
+    block: int | None = None
+    timestamps: dict[int, datetime] = field(default_factory=dict)
     calls: list[Call] = field(default_factory=list)
+    batches: list[int] = field(default_factory=list)  # sizes of each call_many batch, for assertions
 
     # programming helpers ---------------------------------------------------
     def on(self, call: Call, response: Any) -> FakeEvmClient:
@@ -229,16 +297,27 @@ class FakeEvmClient:
             return None
         return raw or None
 
+    def call_many(self, calls: list[Call]) -> list[bytes | None]:
+        self.batches.append(len(calls))
+        return [self.try_call(c) for c in calls]
+
     def get_code(self, address: str) -> bytes:
         return self.code.get(to_checksum_address(address), b"")
 
     def block_number(self) -> int:
-        return self.latest_block
+        return self.block if self.block is not None else self.latest_block
+
+    def block_timestamp(self, block: int | None = None) -> datetime | None:
+        target = block if block is not None else self.block_number()
+        return self.timestamps.get(target)
+
+    def at(self, block: int | None) -> FakeEvmClient:
+        return replace(self, block=block)  # shares the programmed responses/logs, pins reads
 
     def get_logs(
         self, address: str, topics: list[bytes | None], from_block: int, to_block: int | str
     ) -> list[LogEntry]:
-        hi = self.latest_block if to_block == "latest" else int(to_block)
+        hi = min(self.block_number(), self.latest_block if to_block == "latest" else int(to_block))
         addr = to_checksum_address(address)
         out = []
         for entry in self.logs:

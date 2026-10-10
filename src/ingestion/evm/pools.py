@@ -99,90 +99,86 @@ class PoolDiscovery:
     def discover(
         self, token: str, *, deployer: str | None, owner: str | None, now: datetime | None = None
     ) -> list[LiquidityPool]:
+        """Three batched round-trips: factory lookups → pool state → (v2 only) LP-holder log replay."""
         token = to_checksum_address(token)
         native = self.native_price()
-        pools: list[LiquidityPool] = []
+
+        # Round 1: ask every factory about every quote asset at once.
+        probes: list[tuple[str, DexKind, str, int | None, abi.Call]] = []
         for dex_name, dex in self.cfg.dexes.items():
-            for quote_symbol, quote_addr in self.cfg.quote_tokens.items():
-                if quote_addr == token:
+            for qsym, quote in self.cfg.quote_tokens.items():
+                if quote == token:
                     continue
-                try:
-                    found = (
-                        self._discover_v2(
-                            dex_name, dex.factory, token, quote_symbol, quote_addr, native, deployer, owner, now
-                        )
-                        if dex.kind is DexKind.V2
-                        else self._discover_v3(
-                            dex_name, dex.factory, dex.fee_tiers, token, quote_symbol, quote_addr, native
-                        )
+                if dex.kind is DexKind.V2:
+                    probes.append((dex_name, dex.kind, qsym, None, abi.v2_get_pair(dex.factory, token, quote)))
+                else:
+                    probes.extend(
+                        (dex_name, dex.kind, qsym, fee, abi.v3_get_pool(dex.factory, token, quote, fee))
+                        for fee in dex.fee_tiers
                     )
-                except Exception as exc:  # noqa: BLE001
-                    log.warning("%s/%s discovery failed: %s", dex_name, quote_symbol, exc)
-                    continue
-                pools.extend(found)
-        return sorted(pools, key=lambda p: -p.liquidity_usd)
-
-    def _discover_v2(
-        self,
-        dex: str,
-        factory: str,
-        token: str,
-        qsym: str,
-        quote: str,
-        native: NativePrice | None,
-        deployer: str | None,
-        owner: str | None,
-        now: datetime | None,
-    ) -> list[LiquidityPool]:
-        pair = abi.v2_get_pair(factory, token, quote).one(self.client.call(abi.v2_get_pair(factory, token, quote)))
-        if pair == ZERO_ADDRESS:
-            return []
-        token0 = abi.v2_token0(pair).one(self.client.call(abi.v2_token0(pair)))
-        r0, r1, _ = abi.v2_get_reserves(pair).parse(self.client.call(abi.v2_get_reserves(pair)))
-        token_res, quote_res = (r0, r1) if token0 == token else (r1, r0)
-        quote_units = quote_res / 10 ** self.decimals(quote)
-        quote_usd = self.quote_usd(qsym, native)
-        liquidity_usd = 2 * quote_units * quote_usd if quote_usd is not None else 0.0
-        holdings, created = self.lp_holdings_v2(pair, deployer=deployer, owner=owner, now=now)
-        return [
-            LiquidityPool(
-                dex=dex,
-                pair_address=pair,
-                quote_token=qsym,
-                liquidity_usd=liquidity_usd,
-                token_reserve=token_res / 10 ** self.decimals(token),
-                quote_reserve=quote_units,
-                created_at=created,
-                lp_holdings=holdings,
-            )
-        ]
-
-    def _discover_v3(
-        self, dex: str, factory: str, fees: list[int], token: str, qsym: str, quote: str, native: NativePrice | None
-    ) -> list[LiquidityPool]:
-        out: list[LiquidityPool] = []
-        quote_usd = self.quote_usd(qsym, native)
-        for fee in fees:
-            pool = abi.v3_get_pool(factory, token, quote, fee).one(
-                self.client.call(abi.v3_get_pool(factory, token, quote, fee))
-            )
-            if pool == ZERO_ADDRESS:
+        found: list[tuple[str, DexKind, str, int | None, str]] = []
+        for (dex_name, kind, qsym, fee, call), raw in zip(
+            probes, self.client.call_many([p[4] for p in probes]), strict=True
+        ):
+            if raw is None:
                 continue
-            quote_bal = abi.erc20_balance_of(quote, pool).one(self.client.call(abi.erc20_balance_of(quote, pool)))
-            token_bal = abi.erc20_balance_of(token, pool).one(self.client.call(abi.erc20_balance_of(token, pool)))
-            quote_units = quote_bal / 10 ** self.decimals(quote)
-            out.append(
+            try:
+                pool = call.one(raw)
+            except Exception as exc:  # noqa: BLE001 - a misbehaving factory must not sink the scan
+                log.warning("%s/%s lookup undecodable: %s", dex_name, qsym, exc)
+                continue
+            if pool != ZERO_ADDRESS:
+                found.append((dex_name, kind, qsym, fee, pool))
+        if not found:
+            return []
+
+        # Round 2: reserves / balances for every discovered pool.
+        state_calls: list[abi.Call] = []
+        for _dex_name, kind, qsym, _fee, pool in found:
+            quote = self.cfg.quote_tokens[qsym]
+            if kind is DexKind.V2:
+                state_calls += [abi.v2_token0(pool), abi.v2_get_reserves(pool)]
+            else:
+                state_calls += [abi.erc20_balance_of(quote, pool), abi.erc20_balance_of(token, pool)]
+        state = self.client.call_many(state_calls)
+
+        pools: list[LiquidityPool] = []
+        for i, (dex_name, kind, qsym, fee, pool) in enumerate(found):
+            quote = self.cfg.quote_tokens[qsym]
+            a, b = state[2 * i], state[2 * i + 1]
+            if a is None or b is None:
+                log.warning("%s pool %s returned no state – skipped", dex_name, pool)
+                continue
+            quote_usd = self.quote_usd(qsym, native)
+            try:
+                if kind is DexKind.V2:
+                    token0 = abi.v2_token0(pool).one(a)
+                    r0, r1, _ = abi.v2_get_reserves(pool).parse(b)
+                    token_res, quote_res = (r0, r1) if token0 == token else (r1, r0)
+                    holdings, created = self.lp_holdings_v2(pool, deployer=deployer, owner=owner, now=now)
+                    dex_label = dex_name
+                else:
+                    quote_res = abi.erc20_balance_of(quote, pool).one(a)
+                    token_res = abi.erc20_balance_of(token, pool).one(b)
+                    holdings, created = [], None  # v3 positions are NFTs – lock status not resolved here
+                    dex_label = f"{dex_name}_{fee}"
+            except Exception as exc:  # noqa: BLE001
+                log.warning("%s pool %s undecodable: %s", dex_name, pool, exc)
+                continue
+            quote_units = quote_res / 10 ** self.decimals(quote)
+            pools.append(
                 LiquidityPool(
-                    dex=f"{dex}_{fee}",
+                    dex=dex_label,
                     pair_address=pool,
                     quote_token=qsym,
                     liquidity_usd=2 * quote_units * quote_usd if quote_usd is not None else 0.0,
-                    token_reserve=token_bal / 10 ** self.decimals(token),
+                    token_reserve=token_res / 10 ** self.decimals(token),
                     quote_reserve=quote_units,
-                    lp_holdings=[],  # v3 positions are NFTs – lock status not resolved here
+                    created_at=created,
+                    lp_holdings=holdings,
                 )
             )
-        return out
+        return sorted(pools, key=lambda p: -p.liquidity_usd)
 
     # ------------------------------------------------------------------ #
     # LP holders (v2 pair == LP token)
