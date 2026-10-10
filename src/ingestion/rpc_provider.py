@@ -36,6 +36,7 @@ from src.ingestion.evm.explorer import EtherscanClient, Explorer
 from src.ingestion.evm.fingerprint import fingerprint
 from src.ingestion.evm.pools import PoolDiscovery
 from src.ingestion.evm.simulate import SellSimulator
+from src.ingestion.evm.trades import analyse_swaps
 from src.models.risk_report import (
     BURN_ADDRESSES,
     BytecodeMatch,
@@ -71,7 +72,9 @@ class RPCDataProvider(BaseDataProvider):
         prior_rug_lookup: PriorRugLookup | None = None,
         similarity_lookup: SimilarityLookup | None = None,
         simulate_sells: bool = True,
+        swap_window_blocks: int = 200_000,
     ):
+        self.swap_window_blocks = swap_window_blocks
         self.settings = settings or get_settings()
         self.registry = registry or load_chain_registry()
         self._injected_client = client_factory is not None
@@ -174,6 +177,22 @@ class RPCDataProvider(BaseDataProvider):
             if funded:
                 deployer = deployer.model_copy(update={"funded_wallets": funded})
 
+        trades = None
+        if pools and pools[0].dex in cfg.dexes:  # v2-style primary pool – v3 Swap events have a different shape
+            primary = pools[0]
+            trades = self._safe(
+                lambda: analyse_swaps(
+                    client,
+                    primary.pair_address,
+                    token_is_token0=self._is_token0(client, primary.pair_address, token),
+                    quote_decimals=discovery.decimals(cfg.quote_tokens[primary.quote_token]),
+                    from_block=primary.created_block or max(0, block_number - self.swap_window_blocks),
+                    to_block=block_number,
+                    created_block=primary.created_block,
+                ),
+                "swap analysis",
+            )
+
         sell_sim = None
         if self.simulate_sells and pools:
             sell_sim = self._safe(
@@ -228,6 +247,7 @@ class RPCDataProvider(BaseDataProvider):
             contract=contract,
             pools=pools,
             sell_simulation=sell_sim,
+            trades=trades,
             holders=holders,
             deployer=deployer,
         )
@@ -235,6 +255,13 @@ class RPCDataProvider(BaseDataProvider):
     # ------------------------------------------------------------------ #
     # pieces
     # ------------------------------------------------------------------ #
+    @staticmethod
+    def _is_token0(client: EvmClient, pair: str, token: str) -> bool:
+        raw = client.try_call(abi.v2_token0(pair))
+        if not raw:
+            return False
+        return bool(abi.v2_token0(pair).one(raw) == token)
+
     @staticmethod
     def _safe(fn: Callable[[], Any], what: str) -> Any:
         try:

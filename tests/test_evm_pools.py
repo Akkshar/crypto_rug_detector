@@ -135,7 +135,8 @@ def test_replay_balances_and_unknown_contract_holder(client):
     d = PoolDiscovery(client, ETH, REG)
     balances, first = d.replay_balances(PAIR)
     assert balances == {DEPLOYER: 60, other_contract: 40} and first == 1
-    holdings, _ = d.lp_holdings_v2(PAIR, deployer=DEPLOYER, owner=None)
+    holdings, _, created_block = d.lp_holdings_v2(PAIR, deployer=DEPLOYER, owner=None)
+    assert created_block == 1
     assert {h.holder: h.locker for h in holdings} == {DEPLOYER: None, other_contract: LockerKind.UNKNOWN_CONTRACT}
 
 

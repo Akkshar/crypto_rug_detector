@@ -59,6 +59,26 @@
     "effective_buy_tax_pct": 1.1,
     "effective_sell_tax_pct": 1.2
   },
+  "trades": {
+    "pair_address": "0xbbbb000000000000000000000000000000000001",
+    "from_block": 20000000,
+    "to_block": 20500000,
+    "created_block": 20000000,
+    "swaps": 4200,
+    "buys": 2300,
+    "sells": 1900,
+    "unique_buyers": 1500,
+    "unique_sellers": 1200,
+    "unique_traders": 2100,
+    "buy_volume_quote": 310.5,
+    "sell_volume_quote": 280.2,
+    "round_trip_wallets": 600,
+    "round_trip_volume_share": 0.35,
+    "top_trader_share": 0.04,
+    "launch_window_buys": 3,
+    "launch_window_blocks": 3,
+    "traders_resolved": true
+  },
   "holders": {
     "holder_count": 18420,
     "top_holders": [

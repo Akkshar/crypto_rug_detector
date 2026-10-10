@@ -34,6 +34,7 @@ category_caps:                 # max points a single category can contribute
   HONEYPOT: 60
   DISTRIBUTION: 30
   DEPLOYER: 35
+  TRADING: 30
 
 thresholds:
   # contract & privilege
@@ -65,6 +66,15 @@ thresholds:
   serial_launcher_count: 10
   insider_cluster_share: 0.1        # combined share of deployer-funded top holders that triggers a flag
   bytecode_similarity_min: 0.9      # selector-set Jaccard needed to call two contracts "the same template"
+  # trade flow
+  min_buys_for_sell_check: 20       # buys needed before "zero sells" means anything
+  min_buys_for_ratio_check: 50
+  sell_buy_ratio_min: 0.1
+  min_traders_for_wash_check: 10
+  wash_volume_share: 0.5            # volume from round-tripping wallets
+  wash_max_wallets: 5
+  top_trader_share: 0.5
+  launch_snipe_buys: 10             # buys inside the launch window
 
 flags:
   # --- Contract & privilege (contract_inspector) ---
@@ -118,3 +128,9 @@ flags:
   DEPLOYER_PRIOR_RUGS: 30
   DEPLOYER_SERIAL_LAUNCHER: 8
   DEPLOYER_FRESH_WALLET: 8
+  # --- Trade flow (trade_flow) ---
+  NO_SELLS_OBSERVED: 25
+  SELL_BUY_RATIO_LOW: 12
+  WASH_TRADING_SUSPECTED: 10
+  TRADER_CONCENTRATION: 8
+  LAUNCH_SNIPED: 8

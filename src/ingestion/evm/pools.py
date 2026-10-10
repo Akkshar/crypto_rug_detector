@@ -155,12 +155,14 @@ class PoolDiscovery:
                     token0 = abi.v2_token0(pool).one(a)
                     r0, r1, _ = abi.v2_get_reserves(pool).parse(b)
                     token_res, quote_res = (r0, r1) if token0 == token else (r1, r0)
-                    holdings, created = self.lp_holdings_v2(pool, deployer=deployer, owner=owner, now=now)
+                    holdings, created, created_block = self.lp_holdings_v2(
+                        pool, deployer=deployer, owner=owner, now=now
+                    )
                     dex_label = dex_name
                 else:
                     quote_res = abi.erc20_balance_of(quote, pool).one(a)
                     token_res = abi.erc20_balance_of(token, pool).one(b)
-                    holdings, created = [], None  # v3 positions are NFTs – lock status not resolved here
+                    holdings, created, created_block = [], None, None  # v3 positions are NFTs – lock status unresolved
                     dex_label = f"{dex_name}_{fee}"
             except Exception as exc:  # noqa: BLE001
                 log.warning("%s pool %s undecodable: %s", dex_name, pool, exc)
@@ -175,6 +177,7 @@ class PoolDiscovery:
                     token_reserve=token_res / 10 ** self.decimals(token),
                     quote_reserve=quote_units,
                     created_at=created,
+                    created_block=created_block,
                     lp_holdings=holdings,
                 )
             )
@@ -185,13 +188,14 @@ class PoolDiscovery:
     # ------------------------------------------------------------------ #
     def lp_holdings_v2(
         self, pair: str, *, deployer: str | None, owner: str | None, now: datetime | None = None
-    ) -> tuple[list[LPHolding], datetime | None]:
-        balances, _first_block = self.replay_balances(pair)
+    ) -> tuple[list[LPHolding], datetime | None, int | None]:
+        """Returns (holdings, created_at, created_block); the first LP mint marks pool creation."""
+        balances, first_block = self.replay_balances(pair)
         if not balances:
-            return [], None
+            return [], None, first_block
         total = sum(v for v in balances.values() if v > 0)
         if total <= 0:
-            return [], None
+            return [], None, first_block
         insiders = {to_checksum_address(a) for a in (deployer, owner) if a}
         holdings: list[LPHolding] = []
         for holder, bal in sorted(balances.items(), key=lambda kv: -kv[1]):
@@ -212,7 +216,7 @@ class PoolDiscovery:
         excess = sum(h.share for h in holdings) - 1.0
         if excess > 0 and holdings:
             holdings[0] = holdings[0].model_copy(update={"share": max(0.0, holdings[0].share - excess)})
-        return holdings[:25], None
+        return holdings[:25], None, first_block
 
     def replay_balances(self, token: str, *, from_block: int = 0) -> tuple[dict[str, int], int | None]:
         """Rebuild ERC-20 balances from ``Transfer`` logs. Returns (balances, first_block)."""

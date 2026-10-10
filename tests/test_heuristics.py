@@ -355,4 +355,4 @@ def test_deployer_linked_scams_without_count(config, benign):
 
 def test_build_heuristics_registry(config):
     names = [h.name for h in build_heuristics(config)]
-    assert names == ["contract_inspector", "liquidity_analyzer", "holder_metrics", "deployer_tracer"]
+    assert names == ["contract_inspector", "liquidity_analyzer", "holder_metrics", "deployer_tracer", "trade_flow"]

@@ -68,6 +68,7 @@ class RiskCategory(StrEnum):
     HONEYPOT = "HONEYPOT"
     DISTRIBUTION = "DISTRIBUTION"
     DEPLOYER = "DEPLOYER"
+    TRADING = "TRADING"
 
 
 class Severity(StrEnum):
@@ -223,6 +224,7 @@ class LiquidityPool(_Strict):
     token_reserve: float | None = Field(None, ge=0)
     quote_reserve: float | None = Field(None, ge=0)
     created_at: datetime | None = None
+    created_block: int | None = Field(None, ge=0)
     lp_holdings: list[LPHolding] = Field(default_factory=list)
 
     @field_validator("lp_holdings")
@@ -243,6 +245,39 @@ class LiquidityPool(_Strict):
     @property
     def insider_share(self) -> float:
         return min(1.0, sum(h.share for h in self.lp_holdings if h.is_deployer_or_owner and h.locker is None))
+
+
+class TradeActivity(_Strict):
+    """Behavioural summary of on-chain swaps against the primary pool."""
+
+    pair_address: Address
+    from_block: int = Field(ge=0)
+    to_block: int = Field(ge=0)
+    created_block: int | None = Field(None, ge=0, description="Block the pool was created in, if known")
+    swaps: int = Field(0, ge=0)
+    buys: int = Field(0, ge=0)
+    sells: int = Field(0, ge=0)
+    unique_buyers: int = Field(0, ge=0)
+    unique_sellers: int = Field(0, ge=0)
+    unique_traders: int = Field(0, ge=0)
+    buy_volume_quote: float = Field(0.0, ge=0, description="Quote-asset volume bought (token units of the quote)")
+    sell_volume_quote: float = Field(0.0, ge=0)
+    round_trip_wallets: int = Field(0, ge=0, description="Wallets that both bought and sold")
+    round_trip_volume_share: Ratio = Field(0.0, description="Share of total volume from round-trip wallets")
+    top_trader_share: Ratio = Field(0.0, description="Largest single wallet's share of total volume")
+    launch_window_buys: int = Field(0, ge=0, description="Buys within the first launch_window_blocks after creation")
+    launch_window_blocks: int = Field(3, ge=0)
+    traders_resolved: bool = Field(True, description="False when trader identities were capped/unavailable")
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def sell_buy_ratio(self) -> float | None:
+        return None if self.buys == 0 else self.sells / self.buys
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def total_volume_quote(self) -> float:
+        return self.buy_volume_quote + self.sell_volume_quote
 
 
 class SellSimulation(_Strict):
@@ -329,6 +364,7 @@ class TokenSnapshot(_Strict):
     contract: ContractMetadata
     pools: list[LiquidityPool] = Field(default_factory=list)
     sell_simulation: SellSimulation | None = None
+    trades: TradeActivity | None = None
     holders: HolderDistribution = Field(default_factory=HolderDistribution)
     deployer: DeployerProfile | None = None
 

@@ -119,6 +119,14 @@ class Thresholds(_Cfg):
     serial_launcher_count: int = Field(10, ge=1)
     insider_cluster_share: float = Field(0.1, ge=0, le=1)
     bytecode_similarity_min: float = Field(0.9, ge=0, le=1)
+    min_buys_for_sell_check: int = Field(20, ge=1)
+    min_buys_for_ratio_check: int = Field(50, ge=1)
+    sell_buy_ratio_min: float = Field(0.1, ge=0, le=1)
+    min_traders_for_wash_check: int = Field(10, ge=1)
+    wash_volume_share: float = Field(0.5, ge=0, le=1)
+    wash_max_wallets: int = Field(5, ge=1)
+    top_trader_share: float = Field(0.5, ge=0, le=1)
+    launch_snipe_buys: int = Field(10, ge=1)
 
     @model_validator(mode="after")
     def _ordered(self) -> Thresholds:
