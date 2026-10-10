@@ -130,8 +130,10 @@ class Web3EvmClient:
         self.log_span_hint: int | None = None
         #: Largest span that has actually succeeded – the proof that a refusal is about depth, not size.
         self.confirmed_span: int | None = None
-        #: Oldest block the node is known to serve logs for (learned when a confirmed span is still refused).
+        #: Conservative bound: the node refuses every log query ending below this block.
         self.min_served_block: int | None = None
+        #: Exact horizon once bisected: the earliest block the node serves logs from.
+        self.served_from: int | None = None
         self.retries = 3
         self.backoff_s = 0.5
 
@@ -145,6 +147,7 @@ class Web3EvmClient:
         clone.log_span_hint = self.log_span_hint
         clone.confirmed_span = self.confirmed_span
         clone.min_served_block = self.min_served_block
+        clone.served_from = self.served_from
         return clone
 
     # -- transport resilience ------------------------------------------- #
@@ -218,39 +221,59 @@ class Web3EvmClient:
                 out.extend(self.try_call(c) for c in chunk)
         return out
 
+    def _probe(self, address: str, topics: list[bytes | None], start: int, hi: int) -> bool:
+        """One minimum-span eth_getLogs at ``start``; False only on a range/depth refusal."""
+        try:
+            self._fetch_logs(address, topics, start, min(hi, start + self.LOG_MIN_SPAN - 1))
+            return True
+        except Exception as exc:
+            if is_range_limit(exc):
+                return False
+            raise
+
     def find_log_horizon(self, address: str, topics: list[bytes | None], lo: int, hi: int) -> int | None:
-        """Earliest block in [lo, hi] the node serves logs from, by bisection with minimum-span probes.
+        """Earliest block in [lo, hi] the node serves logs from, or None when it serves none of the range.
 
-        ~log2(range) probes instead of crawling one span at a time. Returns None when even the most recent
-        probe is refused (the node serves nothing in this range) and records the result in min_served_block.
+        Refused queries are *slow* on public nodes (the node scans before refusing; measured 3–7 s vs 0.2 s
+        for a served one), so the search gallops backwards from the newest block with cheap served probes
+        and only then bisects the gap to the first refusal. Learned once per node; later calls are free.
         """
-        if self.min_served_block is not None and lo >= self.min_served_block:
-            return lo
-        span = self.LOG_MIN_SPAN
-
-        def served(start: int) -> bool:
-            try:
-                self._fetch_logs(address, topics, start, min(hi, start + span - 1))
-                return True
-            except Exception as exc:
-                if is_range_limit(exc):
-                    return False
-                raise
-
-        right = max(lo, hi - span + 1)
-        if not served(right):
+        if self.served_from is not None:
+            if lo >= self.served_from:
+                return lo
+            return self.served_from if self.served_from <= hi else None
+        if self.min_served_block is not None and hi < self.min_served_block:
+            return None
+        step = self.LOG_MIN_SPAN
+        served_at = max(lo, hi - step + 1)
+        if not self._probe(address, topics, served_at, hi):
             self.min_served_block = max(self.min_served_block or 0, hi + 1)
             return None
-        left = lo  # invariant: `right` is served; `left` is refused (or the range start)
-        while right - left > span:
-            mid = (left + right) // 2
-            if served(mid):
-                right = mid
+        refused_at: int | None = None
+        depth = step
+        while served_at > lo and refused_at is None:
+            depth *= 2
+            candidate = max(lo, hi - depth + 1)
+            if self._probe(address, topics, candidate, hi):
+                served_at = candidate
             else:
-                left = mid
-        self.min_served_block = right if self.min_served_block is None else max(self.min_served_block, right)
-        log.info("node log horizon for %s located at block %d", address, right)
-        return right
+                refused_at = candidate
+        if refused_at is None:
+            horizon = lo
+        else:
+            left, right = refused_at, served_at  # invariant: `right` served, `left` refused
+            while right - left > step:
+                mid = (left + right) // 2
+                if self._probe(address, topics, mid, hi):
+                    right = mid
+                else:
+                    left = mid
+            horizon = right
+        self.served_from = horizon if self.served_from is None else max(self.served_from, horizon)
+        self.min_served_block = max(self.min_served_block or 0, horizon)
+        if horizon > lo:
+            log.info("node log horizon for %s located at block %d", address, horizon)
+        return horizon
 
     def get_code(self, address: str) -> bytes:
         return bytes(
@@ -293,8 +316,10 @@ class Web3EvmClient:
 
     def _logs_adaptive(self, address: str, topics: list[bytes | None], lo: int, hi: int) -> list[LogEntry]:
         span = hi - lo + 1
-        if self.min_served_block is not None and lo < self.min_served_block:
-            raise LogRangeUnavailable(lo, hi, f"node serves logs from block {self.min_served_block} only")
+        if self.min_served_block is not None and hi < self.min_served_block:
+            raise LogRangeUnavailable(lo, hi, f"node serves no logs before block {self.min_served_block}")
+        if self.served_from is not None and lo < self.served_from:
+            raise LogRangeUnavailable(lo, hi, f"node history starts at block {self.served_from}")
         if self.log_span_hint is not None and span > self.log_span_hint:
             out: list[LogEntry] = []
             for a, b in chunked_ranges(lo, hi, self.log_span_hint):
@@ -305,12 +330,20 @@ class Web3EvmClient:
         except Exception as exc:
             if not is_range_limit(exc):
                 raise
-            # Only a span the node has *actually accepted* before proves that splitting cannot help; the
-            # tentative hint set on rejection is not proof. Then the refusal is about depth – the node does
-            # not keep history this old – and we remember the boundary.
-            if span <= self.LOG_MIN_SPAN or (self.confirmed_span is not None and span <= self.confirmed_span):
-                self.min_served_block = max(self.min_served_block or 0, hi + 1)
-                log.info("eth_getLogs refused for blocks %d-%d (%s) – node history starts later", lo, hi, _short(exc))
+            # A refusal is either "span too large" or "history too old". Before halving (which only fixes the
+            # former and would wrongly shrink the span hint for the latter), settle which one it is: probe the
+            # most recent minimum span, and if that is served, bisect for the horizon.
+            if self.served_from is None or lo < self.served_from:
+                horizon = self.find_log_horizon(address, topics, lo, hi)
+                if horizon is None:
+                    log.info(
+                        "eth_getLogs refused for blocks %d-%d (%s) – node history starts later", lo, hi, _short(exc)
+                    )
+                    raise LogRangeUnavailable(lo, hi, _short(exc)) from exc
+                if horizon > lo:
+                    raise LogRangeUnavailable(lo, horizon - 1, f"node history starts at block {horizon}") from exc
+                # the whole range is served, so the refusal was about span → fall through and halve
+            if span <= self.LOG_MIN_SPAN:
                 raise LogRangeUnavailable(lo, hi, _short(exc)) from exc
             half = max(self.LOG_MIN_SPAN, span // 2)
             self.log_span_hint = half if self.log_span_hint is None else min(self.log_span_hint, half)
@@ -572,6 +605,10 @@ def _window(
     entries: list[LogEntry] = []
     first_served: int | None = None
     skipped = 0
+    # For a deep window on a node whose horizon is still unknown, find it up front with cheap served probes
+    # from the newest block: that costs ~2 s, whereas letting the first deep chunk be refused costs 5–10 s.
+    if getattr(client, "served_from", None) is None and to_block - from_block >= 10_000:
+        client.find_log_horizon(address, topics, from_block, to_block)
     for i, (lo, hi) in enumerate(chunked_ranges(from_block, to_block, chunk)):
         if max_chunks is not None and i >= max_chunks:
             log.warning("log window for %s truncated after %d chunks", address, max_chunks)
@@ -579,9 +616,10 @@ def _window(
         try:
             got = client.get_logs(address, topics, lo, hi)
         except LogRangeUnavailable:
-            # The chunk may straddle the node's history horizon. Locate the horizon by bisection (a handful
-            # of small probes) and fetch just the served tail instead of losing the whole chunk.
-            horizon = client.find_log_horizon(address, topics, lo, hi)
+            # Locate the node's history horizon once, over the whole remaining window (galloping from the
+            # newest block, where probes are cheap); then this and every later chunk knows whether to skip,
+            # clip to the served tail, or fetch in full – without any further slow refusals.
+            horizon = client.find_log_horizon(address, topics, lo, to_block)
             if horizon is None or horizon > hi:
                 skipped += 1
                 continue
