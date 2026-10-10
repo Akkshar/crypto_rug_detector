@@ -1,0 +1,89 @@
+{
+  "chain": "base",
+  "address": "0x3333333333333333333333333333333333333333",
+  "observed_at": "2026-10-10T12:00:00Z",
+  "price_usd": 0.42,
+  "contract": {
+    "name": "BaseAI Yield",
+    "symbol": "BAIY",
+    "decimals": 18,
+    "total_supply": 10000000,
+    "source_verified": true,
+    "compiler_version": "v0.8.20+commit.a1b79de6",
+    "deployed_at": "2026-10-09T03:45:00Z",
+    "deployer": "0xaaaa000000000000000000000000000000000003",
+    "owner": "0xaaaa000000000000000000000000000000000003",
+    "owner_type": "eoa",
+    "ownership_renounced": false,
+    "proxy_kind": "none",
+    "buy_tax_pct": 5.0,
+    "sell_tax_pct": 5.0,
+    "transfer_tax_pct": 0.0,
+    "fee_setters": [
+      { "name": "setFees", "selector": "0x0b78f9c0", "restricted_to": "onlyOwner", "upper_bound_pct": 25.0 }
+    ],
+    "max_tx_setters": [],
+    "mint_functions": [
+      { "name": "_rebalanceSupply", "selector": "0x7c3a1f2e", "restricted_to": "onlyOwner", "hidden": true }
+    ],
+    "has_blacklist": false,
+    "has_whitelist_only_transfers": false,
+    "can_pause_trading": false,
+    "trading_enabled": true
+  },
+  "pools": [
+    {
+      "dex": "uniswap_v2",
+      "pair_address": "0xbbbb000000000000000000000000000000000003",
+      "quote_token": "WETH",
+      "liquidity_usd": 18500.0,
+      "token_reserve": 22000,
+      "quote_reserve": 2.9,
+      "created_at": "2026-10-09T04:00:00Z",
+      "lp_holdings": [
+        {
+          "holder": "0xaaaa000000000000000000000000000000000003",
+          "share": 1.0,
+          "is_deployer_or_owner": true
+        }
+      ]
+    }
+  ],
+  "sell_simulation": {
+    "attempted": 20,
+    "succeeded": 19,
+    "buy_gas": 151000,
+    "sell_gas": 171000,
+    "effective_buy_tax_pct": 5.3,
+    "effective_sell_tax_pct": 5.6
+  },
+  "holders": {
+    "holder_count": 1340,
+    "top_holders": [
+      { "address": "0xaaaa000000000000000000000000000000000003", "share": 0.38, "label": "deployer" },
+      { "address": "0xcccc000000000000000000000000000000000021", "share": 0.15, "label": "deployer_linked" },
+      { "address": "0xcccc000000000000000000000000000000000022", "share": 0.11 },
+      { "address": "0xbbbb000000000000000000000000000000000003", "share": 0.08, "label": "uniswap_v2_pair", "is_contract": true, "is_dex_or_burn": true },
+      { "address": "0xcccc000000000000000000000000000000000023", "share": 0.05 },
+      { "address": "0xcccc000000000000000000000000000000000024", "share": 0.04 },
+      { "address": "0xcccc000000000000000000000000000000000025", "share": 0.03 },
+      { "address": "0xcccc000000000000000000000000000000000026", "share": 0.02 },
+      { "address": "0xcccc000000000000000000000000000000000027", "share": 0.02 },
+      { "address": "0xcccc000000000000000000000000000000000028", "share": 0.01 },
+      { "address": "0xcccc000000000000000000000000000000000029", "share": 0.01 }
+    ]
+  },
+  "deployer": {
+    "address": "0xaaaa000000000000000000000000000000000003",
+    "first_seen": "2026-10-08T20:00:00Z",
+    "first_funding_source": "0x910cbd523d972eb0a6f4cae4618ad62622b39dbf",
+    "first_funding_kind": "mixer",
+    "first_funding_label": "Tornado Cash: 10 ETH",
+    "contracts_deployed": 14,
+    "prior_rug_count": 2,
+    "linked_scam_addresses": [
+      "0xdddd000000000000000000000000000000000001",
+      "0xdddd000000000000000000000000000000000002"
+    ]
+  }
+}

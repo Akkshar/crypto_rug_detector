@@ -1,0 +1,94 @@
+{
+  "chain": "bsc",
+  "address": "0x2222222222222222222222222222222222222222",
+  "observed_at": "2026-10-10T12:00:00Z",
+  "price_usd": 0.0000031,
+  "contract": {
+    "name": "SafeMoonElon2.0",
+    "symbol": "SME2",
+    "decimals": 9,
+    "total_supply": 1000000000000,
+    "source_verified": true,
+    "compiler_version": "v0.8.19+commit.7dd6d404",
+    "deployed_at": "2026-10-08T22:14:00Z",
+    "deployer": "0xaaaa000000000000000000000000000000000002",
+    "owner": "0xaaaa000000000000000000000000000000000002",
+    "owner_type": "eoa",
+    "ownership_renounced": false,
+    "proxy_kind": "none",
+    "buy_tax_pct": 2.0,
+    "sell_tax_pct": 99.0,
+    "transfer_tax_pct": 0.0,
+    "fee_setters": [
+      { "name": "setSellFee", "selector": "0x3b2d0b4e", "restricted_to": "onlyOwner", "upper_bound_pct": null },
+      { "name": "setBuyFee", "selector": "0x9d0014b1", "restricted_to": "onlyOwner", "upper_bound_pct": null }
+    ],
+    "max_tx_setters": [
+      { "name": "setMaxTxAmount", "selector": "0xec28438a", "restricted_to": "onlyOwner", "upper_bound_pct": null }
+    ],
+    "mint_functions": [],
+    "has_blacklist": true,
+    "has_whitelist_only_transfers": true,
+    "can_pause_trading": true,
+    "trading_enabled": true
+  },
+  "pools": [
+    {
+      "dex": "pancakeswap_v2",
+      "pair_address": "0xbbbb000000000000000000000000000000000002",
+      "quote_token": "WBNB",
+      "liquidity_usd": 42000.0,
+      "token_reserve": 400000000000,
+      "quote_reserve": 36.2,
+      "created_at": "2026-10-08T22:20:00Z",
+      "lp_holdings": [
+        {
+          "holder": "0x7ee058420e5937496f5a2096f04caa7721cfbd2c",
+          "share": 0.90,
+          "locker": "pinklock",
+          "unlock_at": "2027-10-08T00:00:00Z"
+        },
+        {
+          "holder": "0xaaaa000000000000000000000000000000000002",
+          "share": 0.10,
+          "is_deployer_or_owner": true
+        }
+      ]
+    }
+  ],
+  "sell_simulation": {
+    "attempted": 10,
+    "succeeded": 0,
+    "buy_gas": 168000,
+    "sell_gas": null,
+    "effective_buy_tax_pct": 2.4,
+    "effective_sell_tax_pct": null,
+    "revert_reason": "TransferHelper: TRANSFER_FROM_FAILED"
+  },
+  "holders": {
+    "holder_count": 612,
+    "top_holders": [
+      { "address": "0xbbbb000000000000000000000000000000000002", "share": 0.40, "label": "pancakeswap_v2_pair", "is_contract": true, "is_dex_or_burn": true },
+      { "address": "0xaaaa000000000000000000000000000000000002", "share": 0.12, "label": "deployer" },
+      { "address": "0xcccc000000000000000000000000000000000011", "share": 0.06 },
+      { "address": "0xcccc000000000000000000000000000000000012", "share": 0.05 },
+      { "address": "0xcccc000000000000000000000000000000000013", "share": 0.04 },
+      { "address": "0xcccc000000000000000000000000000000000014", "share": 0.03 },
+      { "address": "0xcccc000000000000000000000000000000000015", "share": 0.03 },
+      { "address": "0xcccc000000000000000000000000000000000016", "share": 0.02 },
+      { "address": "0xcccc000000000000000000000000000000000017", "share": 0.02 },
+      { "address": "0xcccc000000000000000000000000000000000018", "share": 0.02 },
+      { "address": "0xcccc000000000000000000000000000000000019", "share": 0.01 }
+    ]
+  },
+  "deployer": {
+    "address": "0xaaaa000000000000000000000000000000000002",
+    "first_seen": "2026-10-07T18:00:00Z",
+    "first_funding_source": "0x4e9ce36e01e01b7a8c6d2f2f6c1b4a6d3b1f5e22",
+    "first_funding_kind": "privacy_exchange",
+    "first_funding_label": "FixedFloat",
+    "contracts_deployed": 1,
+    "prior_rug_count": 0,
+    "linked_scam_addresses": []
+  }
+}

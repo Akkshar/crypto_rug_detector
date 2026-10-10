@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "crypto-rug-detector"
+version = "0.1.0"
+description = "Hybrid rule-based + ML risk engine for EVM rug pulls, liquidity drains and honeypots."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "pydantic>=2.7,<3",
+    "pydantic-settings>=2.3",
+    "pyyaml>=6.0",
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "scikit-learn>=1.4",
+    "typer>=0.12",
+    "rich>=13.7",
+    "eth-utils>=4.1",
+    "eth-abi>=5.1",
+]
+
+[project.optional-dependencies]
+# Live RPC ingestion. Kept optional so the offline core + tests stay lightweight.
+live = ["web3>=7.0"]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+rugscan = "main:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src", "config"]
+only-include = ["src", "config", "main.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+addopts = "-ra"

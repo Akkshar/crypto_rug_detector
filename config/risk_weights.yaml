@@ -1,0 +1,113 @@
+# Risk weighting configuration for the hybrid scoring engine.
+#
+# Every flag a heuristic can raise MUST have an entry under `flags:` – the engine
+# validates this at start-up and refuses to run with missing codes.
+# Points are summed per category, clipped to that category's cap, and the
+# capped totals are summed (and clipped to 100) to form the rule-based score.
+
+version: 1
+
+scoring:
+  rule_weight: 0.75            # share of the final score from rule points
+  ml_weight: 0.25              # share from the ML rug-probability model (must sum to 1)
+  hard_fail_score_floor: 95    # minimum final score when the pre-filter hard-fails
+  unreliable_ml_factor: 0.5    # ML weight multiplier when the input is out-of-distribution or heavily imputed
+
+tiers:                         # lower bounds (score >= bound)
+  medium: 25
+  high: 50
+  critical: 75
+
+prefilter:
+  hard_fail_tax_pct: 90        # declared or measured tax at/above this is an immediate CRITICAL
+
+ml:
+  enabled: true
+  n_samples: 4000              # synthetic training rows
+  seed: 7
+  ood_percentile: 0.99         # IsolationForest novelty percentile above which ML is down-weighted
+  max_imputed_features: 2      # more imputed features than this also down-weights ML
+
+category_caps:                 # max points a single category can contribute
+  CONTRACT_PRIVILEGE: 50
+  LIQUIDITY: 50
+  HONEYPOT: 60
+  DISTRIBUTION: 30
+  DEPLOYER: 35
+
+thresholds:
+  # contract & privilege
+  max_reasonable_fee_pct: 25         # fee setters bounded above this count as unbounded
+  proxy_min_upgrade_delay_hours: 24  # upgrade delays shorter than this count as "no timelock"
+  # taxes
+  tax_elevated_pct: 10
+  tax_high_pct: 25
+  # liquidity
+  lp_locked_ok_ratio: 0.8            # locked + burned LP share required for is_lp_locked
+  lp_mostly_unlocked_ratio: 0.5
+  lp_partially_unlocked_ratio: 0.2
+  lp_insider_ratio: 0.1              # deployer/owner-held LP share that triggers a drain flag
+  lp_lock_min_days: 30               # locks expiring sooner than this are flagged
+  low_liquidity_usd: 10000
+  fdv_liquidity_ratio_warn: 100
+  fdv_liquidity_ratio_extreme: 1000
+  # sell simulation
+  min_sell_success_rate: 0.8
+  hidden_tax_tolerance_pct: 10       # measured sell loss above declared tax by more than this
+  max_sell_gas: 1000000
+  sell_gas_ratio: 3.0                # sell gas / buy gas
+  # distribution
+  top10_high: 0.5
+  top10_elevated: 0.3
+  single_whale: 0.2
+  # deployer
+  fresh_deployer_days: 7
+  serial_launcher_count: 10
+
+flags:
+  # --- Contract & privilege (contract_inspector) ---
+  OWNER_ACTIVE_EOA: 12
+  OWNER_CONTRACT_NO_TIMELOCK: 6
+  OWNER_MULTISIG: 2
+  SOURCE_UNVERIFIED: 10
+  UNBOUNDED_FEE_SETTER: 20
+  UNBOUNDED_MAX_TX_SETTER: 8
+  MINT_FUNCTION_PRIVILEGED: 20
+  HIDDEN_MINT_FUNCTION: 25
+  BLACKLIST_CAPABILITY: 12
+  PAUSE_TRADING_CAPABILITY: 10
+  WHITELIST_TRANSFER_GATE: 12
+  PROXY_UNVERIFIED_IMPLEMENTATION: 20
+  PROXY_UPGRADE_NO_TIMELOCK: 10
+  # --- Declared taxes (contract_inspector, HONEYPOT category) ---
+  SELL_TAX_EXTREME: 40
+  SELL_TAX_HIGH: 20
+  SELL_TAX_ELEVATED: 8
+  BUY_TAX_EXTREME: 25
+  BUY_TAX_HIGH: 12
+  BUY_TAX_ELEVATED: 5
+  # --- Liquidity (liquidity_analyzer) ---
+  NO_LIQUIDITY_POOL: 15
+  LP_MOSTLY_UNLOCKED: 30
+  LP_PARTIALLY_UNLOCKED: 15
+  LP_HELD_BY_INSIDER: 15
+  LP_LOCK_EXPIRING: 8
+  LOW_LIQUIDITY: 8
+  FDV_LIQUIDITY_IMBALANCE: 10
+  FDV_LIQUIDITY_EXTREME: 20
+  # --- Sell simulation / honeypot (liquidity_analyzer) ---
+  HONEYPOT_SELL_BLOCKED: 50
+  LOW_SELL_SUCCESS_RATE: 25
+  HIDDEN_SELL_TAX: 20
+  EXCESSIVE_SELL_GAS: 8
+  SELL_SIMULATION_UNAVAILABLE: 5
+  # --- Distribution (holder_metrics) ---
+  TOP10_CONCENTRATION_HIGH: 20
+  TOP10_CONCENTRATION_ELEVATED: 8
+  SINGLE_WHALE_DOMINANT: 10
+  # --- Deployer (deployer_tracer) ---
+  DEPLOYER_MIXER_FUNDED: 25
+  DEPLOYER_PRIVACY_EXCHANGE_FUNDED: 15
+  DEPLOYER_PRIOR_RUGS: 30
+  DEPLOYER_SERIAL_LAUNCHER: 8
+  DEPLOYER_FRESH_WALLET: 8

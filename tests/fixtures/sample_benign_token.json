@@ -1,0 +1,89 @@
+{
+  "chain": "ethereum",
+  "address": "0x1111111111111111111111111111111111111111",
+  "observed_at": "2026-10-10T12:00:00Z",
+  "price_usd": 0.0125,
+  "contract": {
+    "name": "Benign Governance Token",
+    "symbol": "BENIGN",
+    "decimals": 18,
+    "total_supply": 100000000,
+    "source_verified": true,
+    "compiler_version": "v0.8.24+commit.e11b9ed9",
+    "deployed_at": "2025-06-01T09:30:00Z",
+    "deployer": "0xaaaa000000000000000000000000000000000001",
+    "owner": "0x0000000000000000000000000000000000000000",
+    "owner_type": "renounced",
+    "ownership_renounced": true,
+    "proxy_kind": "none",
+    "buy_tax_pct": 1.0,
+    "sell_tax_pct": 1.0,
+    "transfer_tax_pct": 0.0,
+    "fee_setters": [],
+    "max_tx_setters": [],
+    "mint_functions": [],
+    "has_blacklist": false,
+    "has_whitelist_only_transfers": false,
+    "can_pause_trading": false,
+    "trading_enabled": true
+  },
+  "pools": [
+    {
+      "dex": "uniswap_v2",
+      "pair_address": "0xbbbb000000000000000000000000000000000001",
+      "quote_token": "WETH",
+      "liquidity_usd": 850000.0,
+      "token_reserve": 34000000,
+      "quote_reserve": 130.5,
+      "created_at": "2025-06-01T10:00:00Z",
+      "lp_holdings": [
+        {
+          "holder": "0x663a5c229c09b049e36dcc11a9b0d4a8eb9db214",
+          "share": 0.95,
+          "locker": "uncx",
+          "unlock_at": "2027-06-01T00:00:00Z"
+        },
+        {
+          "holder": "0x000000000000000000000000000000000000dead",
+          "share": 0.05,
+          "locker": "burned"
+        }
+      ]
+    }
+  ],
+  "sell_simulation": {
+    "attempted": 20,
+    "succeeded": 20,
+    "buy_gas": 142000,
+    "sell_gas": 156000,
+    "effective_buy_tax_pct": 1.1,
+    "effective_sell_tax_pct": 1.2
+  },
+  "holders": {
+    "holder_count": 18420,
+    "top_holders": [
+      { "address": "0xbbbb000000000000000000000000000000000001", "share": 0.34, "label": "uniswap_v2_pair", "is_contract": true, "is_dex_or_burn": true },
+      { "address": "0x000000000000000000000000000000000000dead", "share": 0.10, "label": "burn", "is_dex_or_burn": true },
+      { "address": "0xcccc000000000000000000000000000000000001", "share": 0.04, "label": "treasury_multisig", "is_contract": true },
+      { "address": "0xcccc000000000000000000000000000000000002", "share": 0.03 },
+      { "address": "0xcccc000000000000000000000000000000000003", "share": 0.025 },
+      { "address": "0xcccc000000000000000000000000000000000004", "share": 0.02 },
+      { "address": "0xcccc000000000000000000000000000000000005", "share": 0.018 },
+      { "address": "0xcccc000000000000000000000000000000000006", "share": 0.015 },
+      { "address": "0xcccc000000000000000000000000000000000007", "share": 0.012 },
+      { "address": "0xcccc000000000000000000000000000000000008", "share": 0.011 },
+      { "address": "0xcccc000000000000000000000000000000000009", "share": 0.010 },
+      { "address": "0xcccc00000000000000000000000000000000000a", "share": 0.009 }
+    ]
+  },
+  "deployer": {
+    "address": "0xaaaa000000000000000000000000000000000001",
+    "first_seen": "2023-02-14T00:00:00Z",
+    "first_funding_source": "0x28c6c06298d514db089934071355e5743bf21d60",
+    "first_funding_kind": "cex",
+    "first_funding_label": "Binance 14",
+    "contracts_deployed": 3,
+    "prior_rug_count": 0,
+    "linked_scam_addresses": []
+  }
+}
