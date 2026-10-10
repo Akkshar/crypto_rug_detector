@@ -8,6 +8,8 @@ dist/
 build/
 reports/
 .rugscan/
+web/node_modules/
+web/dist/
 .mypy_cache/
 .ruff_cache/
 .hypothesis/

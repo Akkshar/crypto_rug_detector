@@ -11,3 +11,5 @@ __pycache__/
 reports/
 tests/test_*.py
 tests/conftest.py
+web/node_modules/
+web/dist/

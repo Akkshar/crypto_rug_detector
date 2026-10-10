@@ -149,6 +149,16 @@ python main.py watch 0x… -p rpc -c bsc --interval 30 --cache c.db --webhook $D
 
 Emits `initial`, then on each check: `tier_escalation`, `score_jump`, `new_critical_flag`, `liquidity_drop` (default ≥ 30 %), `lp_unlocked` (locked LP share falls ≥ 10 points) and `error`. Webhook payloads use the Discord/Slack `content` + `embeds` dialect.
 
+## Dashboard
+
+```bash
+cd web && npm ci && npm run build && cd ..          # builds web/dist (Node 22+)
+pip install ".[api]"
+python main.py serve -p rpc --cache c.db            # open http://127.0.0.1:8000/
+```
+
+A React single-page app served by the API: enter an address → tier badge and score gauge, the per-category point breakdown (with cap overflow markers), the ML feature contributions ("what moved the model"), every flag with its evidence JSON, and the score history across scans when a cache is configured. With `-p mock` it offers the three offline fixtures as one-click examples. For frontend development run `npm run dev` in `web/` (Vite on :5173 proxies the API on :8000). The Docker image builds the bundle in a Node stage, so `docker run -p 8000:8000 rugscan serve --host 0.0.0.0` serves it too.
+
 ## HTTP API
 
 ```bash

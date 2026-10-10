@@ -76,6 +76,18 @@ def test_app_without_cache(tmp_path: Path):
         assert c.post("/scan", json={"chain": "ethereum", "address": BENIGN}).json()["report"]["risk_tier"] == "LOW"
 
 
+def test_dashboard_served_when_built(client):
+    from src.api.app import web_dist_dir
+
+    if web_dist_dir() is None:
+        pytest.skip("web/dist not built (run `npm run build` in web/)")
+    assert client.get("/health").json()["dashboard"] is True
+    page = client.get("/")
+    assert page.status_code == 200 and '<div id="root">' in page.text
+    # API routes still win over the static mount
+    assert client.get("/stats").status_code == 200
+
+
 def test_serve_cli_help():
     from typer.testing import CliRunner
 

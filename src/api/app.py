@@ -80,6 +80,16 @@ def create_app(
     app = FastAPI(title="rugscan", version=__version__, description="Rug pull / honeypot risk scoring for EVM tokens")
     app.state.engine, app.state.provider, app.state.cache = engine, provider, cache
 
+    # The Vite dev server (5173) talks to the API cross-origin during frontend development.
+    from fastapi.middleware.cors import CORSMiddleware
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_methods=["GET", "POST"],
+        allow_headers=["content-type"],
+    )
+
     @app.get("/health")
     async def health() -> dict[str, Any]:
         supported = [c.value for c in Chain if await provider.supports(c)]
@@ -91,6 +101,7 @@ def create_app(
             "model": engine.model.name if engine.model else None,
             "model_trained_on": getattr(engine.model, "trained_on", None),
             "cache": cache is not None,
+            "dashboard": bool(getattr(app.state, "dashboard", False)),
         }
 
     @app.post("/scan", response_model=ScanResponse)
@@ -155,4 +166,17 @@ def create_app(
     async def stats() -> dict[str, Any]:
         return cache.stats() if cache is not None else {"cache": False}
 
+    # Dashboard: a built React bundle (web/dist) is served at "/" after every API route, so routes win.
+    dist = web_dist_dir()
+    if dist is not None:
+        from fastapi.staticfiles import StaticFiles
+
+        app.mount("/", StaticFiles(directory=str(dist), html=True), name="dashboard")
+    app.state.dashboard = dist is not None
+
     return app
+
+
+def web_dist_dir() -> Path | None:
+    dist = Path(__file__).resolve().parents[2] / "web" / "dist"
+    return dist if (dist / "index.html").is_file() else None
