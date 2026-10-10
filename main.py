@@ -504,6 +504,31 @@ def discover(
         err.print(f"[dim]{rounds} round(s), {len(hose.reports)} token(s) scored[/dim]")
 
 
+@app.command()
+def serve(
+    host: Annotated[str, typer.Option(help="Bind address")] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="Port")] = 8000,
+    provider: Annotated[ProviderKind, typer.Option("--provider", "-p")] = ProviderKind.RPC,
+    cache: Annotated[Path | None, typer.Option(help="SQLite cache (or RUGSCAN_CACHE_PATH)")] = None,
+    weights: Annotated[Path | None, typer.Option(help="Alternative risk_weights.yaml")] = None,
+    fixtures: Annotated[Path | None, typer.Option(help="Fixture directory for the mock provider")] = None,
+) -> None:
+    """Run the HTTP API (needs the `api` extra: pip install .[api])."""
+    try:
+        import uvicorn
+
+        from src.api import create_app
+    except ImportError as exc:
+        err.print(f"[bold red]error:[/bold red] {exc}; install with `pip install .[api]`")
+        raise typer.Exit(code=2) from exc
+
+    _utf8_stdout()
+    configure_logging("INFO", console=err)
+    application = create_app(provider_kind=provider.value, cache_path=cache, weights=weights, fixtures_dir=fixtures)
+    err.print(f"[dim]rugscan API on http://{host}:{port}  (docs at /docs) – provider {provider.value}[/dim]")
+    uvicorn.run(application, host=host, port=port, log_level="info")
+
+
 @app.command("export-snapshots")
 def export_snapshots(
     output: Annotated[Path, typer.Argument(help="Destination .jsonl")],

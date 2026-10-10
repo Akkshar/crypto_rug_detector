@@ -149,6 +149,17 @@ python main.py watch 0x… -p rpc -c bsc --interval 30 --cache c.db --webhook $D
 
 Emits `initial`, then on each check: `tier_escalation`, `score_jump`, `new_critical_flag`, `liquidity_drop` (default ≥ 30 %), `lp_unlocked` (locked LP share falls ≥ 10 points) and `error`. Webhook payloads use the Discord/Slack `content` + `embeds` dialect.
 
+## HTTP API
+
+```bash
+pip install ".[api]"
+python main.py serve -p rpc --cache c.db --port 8000       # docs at http://127.0.0.1:8000/docs
+curl -X POST localhost:8000/scan -H 'content-type: application/json' \
+     -d '{"chain":"base","address":"0xTOKEN…","max_age_s":3600}'
+```
+
+`POST /scan` returns the full `RiskReport` plus `from_cache` and the previous score; `GET /history/{chain}/{address}`, `POST /label`, `GET /weights`, `GET /stats`, `GET /health`. The same engine, provider and cache objects the CLI uses, so verdicts are identical. The Docker image exposes port 8000 (`docker run -p 8000:8000 rugscan serve --host 0.0.0.0 -p rpc`).
+
 ## Development
 
 ```bash
@@ -170,7 +181,7 @@ CI (`.github/workflows/ci.yml`) runs lint, format, mypy, the test suite with cov
 
 * The bundled ML model is trained on **synthetic** data: it encodes priors, not learned behaviour. Its weight is 0.25 and it is down-weighted on novelty. Use `backtest` on a labelled corpus before trusting any threshold.
 * `chains.yaml` addresses are the canonical deployments as best known at authoring time — verify them against protocol docs before production use; a wrong factory address silently yields "no pool found".
-* v3 LP positions are not resolved for lock status; sell simulation and swap analytics cover v2-style pools only.
+* v3 support (LP ownership via position NFTs, swap analytics, `exactInputSingle` simulation) uses the spot price from `slot0` for quotes, so measured "tax" on a very thin v3 pool includes some price impact; the probe trade is 0.01 native to keep that negligible, and reverts are exact regardless.
 * Everything network-facing was verified against fakes that mimic node semantics (state overrides, `amountOutMin` reverts, Multicall3); the first live run against a real RPC is the real test.
 * Holder distribution is rebuilt from `Transfer` logs with a chunk cap; very large tokens are reported as unavailable rather than partially replayed.
 * Heuristic thresholds are opinionated defaults, not calibrated — that is what the backtest harness is for.

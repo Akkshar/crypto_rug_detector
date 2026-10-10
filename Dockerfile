@@ -14,14 +14,16 @@ WORKDIR /app
 # Dependency layer – only re-runs when the lock or project metadata changes.
 COPY pyproject.toml uv.lock README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project --extra live
+    uv sync --frozen --no-dev --no-install-project --extra live --extra api
 
 COPY config ./config
 COPY src ./src
 COPY main.py ./
 COPY tests/fixtures ./tests/fixtures
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --extra live
+    uv sync --frozen --no-dev --extra live --extra api
+
+EXPOSE 8000
 
 RUN useradd --create-home --uid 1000 rugscan && chown -R rugscan:rugscan /app
 USER rugscan
