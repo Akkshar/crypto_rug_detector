@@ -1,149 +1,328 @@
-"""Live Web3.py provider — **stub**.
+"""Live Web3.py provider.
 
-What works today (needs the ``live`` extra and an ``RUGSCAN_<CHAIN>_RPC_URL``):
+Builds a ``TokenSnapshot`` from an RPC endpoint plus (optionally) an
+Etherscan-compatible explorer API. Every sub-fetch is isolated: a failure in
+one leaves that part of the snapshot ``None`` and is logged, so a single flaky
+endpoint degrades the scan instead of aborting it.
 
-* basic ERC-20 metadata (``name``/``symbol``/``decimals``/``totalSupply``)
-* ``owner()`` lookup and EOA-vs-contract classification
-* bytecode-level selector probing for a small set of privileged functions
-
-What is intentionally **not** implemented yet and surfaces as ``None`` /
-empty in the snapshot (heuristics then report ``data_available=False``):
-
-* liquidity pool discovery and LP-locker resolution
-* buy/sell simulation (requires a forked EVM or a router ``eth_call`` harness)
-* holder distribution (needs an indexer such as Etherscan / Covalent / Dune)
-* deployer funding-origin tracing (needs tx-history indexing + label sets)
-
-Everything the stub returns is still a valid ``TokenSnapshot`` so the rest of
-the pipeline runs end-to-end — it simply scores with less evidence.
+Pipeline
+--------
+1. bytecode + ERC-20 metadata + ``owner()`` (RPC)
+2. verified source / ABI (explorer) → capability analysis
+3. deployer provenance (explorer)
+4. pool discovery, LP holders, native price (RPC)
+5. token holder distribution by Transfer-log replay (RPC)
+6. sell simulation via ``eth_call`` state overrides (RPC)
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
+from datetime import datetime, timezone
 from typing import Any
 
-from eth_utils import function_signature_to_4byte_selector, to_checksum_address
+from eth_utils import to_checksum_address
 
+from config.chains import ChainRegistry, load_chain_registry
 from config.settings import Settings, get_settings
 from src.ingestion.base import BaseDataProvider, ProviderError
+from src.ingestion.evm import abi
+from src.ingestion.evm.capabilities import Capabilities, analyse_abi, analyse_source, merge, probe_bytecode
+from src.ingestion.evm.client import EvmClient, Web3EvmClient
+from src.ingestion.evm.deployer import trace_deployer
+from src.ingestion.evm.explorer import EtherscanClient, Explorer
+from src.ingestion.evm.pools import PoolDiscovery
+from src.ingestion.evm.simulate import SellSimulator
 from src.models.risk_report import (
     BURN_ADDRESSES,
     Chain,
     ContractMetadata,
-    FunctionSignature,
+    Holder,
+    HolderDistribution,
     OwnerType,
+    ProxyKind,
     TokenSnapshot,
 )
 
 log = logging.getLogger("rugscan.rpc")
 
-ERC20_ABI: list[dict[str, Any]] = [
-    {"name": "name", "type": "function", "stateMutability": "view", "inputs": [], "outputs": [{"type": "string"}]},
-    {"name": "symbol", "type": "function", "stateMutability": "view", "inputs": [], "outputs": [{"type": "string"}]},
-    {"name": "decimals", "type": "function", "stateMutability": "view", "inputs": [], "outputs": [{"type": "uint8"}]},
-    {
-        "name": "totalSupply",
-        "type": "function",
-        "stateMutability": "view",
-        "inputs": [],
-        "outputs": [{"type": "uint256"}],
-    },
-    {"name": "owner", "type": "function", "stateMutability": "view", "inputs": [], "outputs": [{"type": "address"}]},
-]
+ClientFactory = Callable[[Chain], EvmClient]
+ExplorerFactory = Callable[[Chain], Explorer | None]
+PriorRugLookup = Callable[[str], tuple[int | None, list[str]]]
 
-# Selectors whose presence in the runtime bytecode is a strong hint of a capability.
-PROBE_SIGNATURES: dict[str, tuple[str, ...]] = {
-    "fee_setters": ("setTaxFee(uint256)", "setSellFee(uint256)", "setBuyFee(uint256)", "setFees(uint256,uint256)"),
-    "max_tx_setters": ("setMaxTxAmount(uint256)", "setMaxTx(uint256)", "setMaxWallet(uint256)"),
-    "mint_functions": ("mint(address,uint256)", "mint(uint256)"),
-    "blacklist": ("blacklist(address)", "setBlacklist(address,bool)", "addBot(address)", "setBots(address[],bool)"),
-    "pause": ("pause()", "setTradingEnabled(bool)", "enableTrading()"),
-}
+SAFE_SINGLETON_CODE_MARKERS = (b"\x5a\xf4",)  # delegatecall-based proxies (Gnosis Safe, minimal proxies)
 
 
 class RPCDataProvider(BaseDataProvider):
     name = "rpc"
 
-    def __init__(self, settings: Settings | None = None):
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        *,
+        registry: ChainRegistry | None = None,
+        client_factory: ClientFactory | None = None,
+        explorer_factory: ExplorerFactory | None = None,
+        prior_rug_lookup: PriorRugLookup | None = None,
+        simulate_sells: bool = True,
+    ):
         self.settings = settings or get_settings()
-        self._clients: dict[Chain, Any] = {}
+        self.registry = registry or load_chain_registry()
+        self._injected_client = client_factory is not None
+        self._client_factory = client_factory or self._default_client
+        self._explorer_factory = explorer_factory or self._default_explorer
+        self._prior_rug_lookup = prior_rug_lookup
+        self.simulate_sells = simulate_sells
+        self._clients: dict[Chain, EvmClient] = {}
 
-    async def supports(self, chain: Chain) -> bool:
-        return self.settings.rpc_url(chain) is not None
-
-    def _web3(self, chain: Chain):
-        if chain in self._clients:
-            return self._clients[chain]
+    # ------------------------------------------------------------------ #
+    # factories
+    # ------------------------------------------------------------------ #
+    def _default_client(self, chain: Chain) -> EvmClient:
         url = self.settings.rpc_url(chain)
         if not url:
             raise ProviderError(f"no RPC URL configured for {chain} (set RUGSCAN_{chain.upper()}_RPC_URL)")
         try:
             from web3 import Web3
-        except ImportError as exc:  # pragma: no cover - depends on optional extra
+        except ImportError as exc:  # pragma: no cover - optional extra
             raise ProviderError("web3 is not installed; install with `pip install .[live]`") from exc
         w3 = Web3(Web3.HTTPProvider(url, request_kwargs={"timeout": self.settings.rpc_timeout_s}))
-        self._clients[chain] = w3
-        return w3
+        return Web3EvmClient(w3, chain_id=self.registry.get(chain).chain_id)
+
+    def _default_explorer(self, chain: Chain) -> Explorer | None:
+        cfg = self.registry.get(chain)
+        if not cfg.explorer_api:
+            return None
+        key = self.settings.etherscan_api_key.get_secret_value() if self.settings.etherscan_api_key else None
+        if not key:
+            log.info("no RUGSCAN_ETHERSCAN_API_KEY – source verification and deployer tracing skipped")
+            return None
+        return EtherscanClient(cfg.explorer_api, cfg.chain_id, key, timeout=self.settings.rpc_timeout_s)
+
+    def _client(self, chain: Chain) -> EvmClient:
+        if chain not in self._clients:
+            self._clients[chain] = self._client_factory(chain)
+        return self._clients[chain]
+
+    async def supports(self, chain: Chain) -> bool:
+        return self._injected_client or self.settings.rpc_url(chain) is not None
 
     # ------------------------------------------------------------------ #
     async def fetch_snapshot(self, chain: Chain, address: str) -> TokenSnapshot:
-        # web3's HTTP provider is blocking; push it off the event loop.
-        return await asyncio.to_thread(self._fetch_sync, chain, address)
+        return await asyncio.to_thread(self.fetch_sync, chain, address)
 
-    def _fetch_sync(self, chain: Chain, address: str) -> TokenSnapshot:
-        w3 = self._web3(chain)
+    def fetch_sync(self, chain: Chain, address: str) -> TokenSnapshot:
+        chain = Chain(chain)
+        client = self._client(chain)
+        cfg = self.registry.get(chain)
         token = to_checksum_address(address)
-        code = bytes(w3.eth.get_code(token))
+        now = datetime.now(timezone.utc)
+
+        code = client.get_code(token)
         if not code:
-            raise ProviderError(f"{token} has no bytecode on {chain} — not a contract")
+            raise ProviderError(f"{token} has no bytecode on {chain.value} — not a contract")
 
-        contract = w3.eth.contract(address=token, abi=ERC20_ABI)
-        meta: dict[str, Any] = {}
-        for fn in ("name", "symbol", "decimals", "totalSupply", "owner"):
-            try:
-                meta[fn] = contract.functions[fn]().call()
-            except Exception as exc:
-                log.debug("%s.%s() unavailable: %s", token, fn, exc)
-                meta[fn] = None
+        meta = self._erc20_metadata(client, token)
+        owner, owner_type = self._owner(client, token)
+        explorer = self._safe(lambda: self._explorer_factory(chain), "explorer init")
+        source = self._safe(lambda: explorer.get_source(token) if explorer else None, "source lookup")
+        caps = self._capabilities(code, source)
 
-        decimals = meta["decimals"] if meta["decimals"] is not None else 18
-        supply = meta["totalSupply"] / 10**decimals if meta["totalSupply"] is not None else None
+        deployer = None
+        if explorer is not None:
+            deployer = self._safe(
+                lambda: trace_deployer(explorer, cfg, token, prior_rug_lookup=self._prior_rug_lookup), "deployer trace"
+            )
 
-        owner = meta["owner"]
-        owner_type = OwnerType.UNKNOWN
-        if owner is not None:
-            owner = to_checksum_address(owner)
-            if owner in BURN_ADDRESSES:
-                owner_type = OwnerType.RENOUNCED
-            else:
-                owner_type = OwnerType.CONTRACT if w3.eth.get_code(owner) else OwnerType.EOA
+        discovery = PoolDiscovery(client, cfg, self.registry)
+        pools = (
+            self._safe(
+                lambda: discovery.discover(
+                    token, deployer=deployer.address if deployer else None, owner=owner, now=now
+                ),
+                "pool discovery",
+            )
+            or []
+        )
 
-        probes = {key: self._probe(code, sigs) for key, sigs in PROBE_SIGNATURES.items()}
+        price_usd = self._token_price(discovery, pools, meta["decimals"])
+        holders = (
+            self._safe(lambda: self._holders(discovery, token, pools, cfg), "holder replay") or HolderDistribution()
+        )
 
-        metadata = ContractMetadata(
+        sell_sim = None
+        if self.simulate_sells and pools:
+            sell_sim = self._safe(
+                lambda: SellSimulator(client, cfg, discovery).simulate(token, pools[0]), "sell simulation"
+            )
+
+        proxy_kind = ProxyKind.NONE
+        implementation = None
+        implementation_verified = None
+        if source and source.is_proxy:
+            proxy_kind = ProxyKind.UNKNOWN
+            implementation = source.implementation
+            if implementation and explorer is not None:
+                impl_src = self._safe(lambda: explorer.get_source(implementation), "implementation source")
+                implementation_verified = bool(impl_src and impl_src.verified)
+
+        declared = self._declared_taxes(client, token)
+
+        contract = ContractMetadata(
             name=meta["name"],
             symbol=meta["symbol"],
-            decimals=decimals,
-            total_supply=supply,
-            source_verified=False,  # TODO: Etherscan-style verification lookup
+            decimals=meta["decimals"],
+            total_supply=meta["total_supply"],
+            source_verified=bool(source and source.verified),
+            compiler_version=source.compiler_version if source else None,
+            deployer=deployer.address if deployer else None,
             owner=owner,
             owner_type=owner_type,
-            fee_setters=probes["fee_setters"],
-            max_tx_setters=probes["max_tx_setters"],
-            mint_functions=probes["mint_functions"],
-            has_blacklist=bool(probes["blacklist"]),
-            can_pause_trading=bool(probes["pause"]),
+            proxy_kind=proxy_kind,
+            implementation=implementation,
+            implementation_verified=implementation_verified,
+            buy_tax_pct=declared.get("buy"),
+            sell_tax_pct=declared.get("sell"),
+            fee_setters=caps.fee_setters,
+            max_tx_setters=caps.max_tx_setters,
+            mint_functions=caps.mint_functions,
+            has_blacklist=caps.has_blacklist,
+            has_whitelist_only_transfers=caps.has_whitelist_only_transfers,
+            can_pause_trading=caps.can_pause_trading,
+            has_selfdestruct=caps.has_selfdestruct,
+            has_delegatecall=caps.has_delegatecall,
         )
-        return TokenSnapshot(chain=chain, address=token, contract=metadata)
+        return TokenSnapshot(
+            chain=chain,
+            address=token,
+            observed_at=now,
+            price_usd=price_usd,
+            contract=contract,
+            pools=pools,
+            sell_simulation=sell_sim,
+            holders=holders,
+            deployer=deployer,
+        )
+
+    # ------------------------------------------------------------------ #
+    # pieces
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _safe(fn: Callable[[], Any], what: str) -> Any:
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("%s failed: %s", what, exc)
+            return None
+
+    def _erc20_metadata(self, client: EvmClient, token: str) -> dict[str, Any]:
+        def read(call: abi.Call) -> Any:
+            raw = client.try_call(call)
+            if raw is None:
+                return None
+            try:
+                return call.one(raw)
+            except Exception:  # noqa: BLE001
+                return None
+
+        decimals = read(abi.erc20_decimals(token))
+        decimals = int(decimals) if decimals is not None else 18
+        supply_raw = read(abi.erc20_total_supply(token))
+        return {
+            "name": read(abi.erc20_name(token)),
+            "symbol": read(abi.erc20_symbol(token)),
+            "decimals": decimals,
+            "total_supply": supply_raw / 10**decimals if supply_raw is not None else None,
+        }
+
+    def _owner(self, client: EvmClient, token: str) -> tuple[str | None, OwnerType]:
+        raw = client.try_call(abi.owner(token))
+        if raw is None:
+            return None, OwnerType.UNKNOWN
+        try:
+            owner = abi.owner(token).one(raw)
+        except Exception:  # noqa: BLE001
+            return None, OwnerType.UNKNOWN
+        if owner in BURN_ADDRESSES:
+            return owner, OwnerType.RENOUNCED
+        code = client.get_code(owner)
+        if not code:
+            return owner, OwnerType.EOA
+        if any(m in code for m in SAFE_SINGLETON_CODE_MARKERS) and len(code) < 200:
+            return owner, OwnerType.MULTISIG  # proxy-shaped owner: most likely a Safe
+        if client.try_call(abi.Call(owner, "getMinDelay()", returns=("uint256",))) is not None:
+            return owner, OwnerType.TIMELOCK  # OpenZeppelin TimelockController
+        return owner, OwnerType.CONTRACT
 
     @staticmethod
-    def _probe(code: bytes, signatures: tuple[str, ...]) -> list[FunctionSignature]:
-        found: list[FunctionSignature] = []
-        for sig in signatures:
-            selector = function_signature_to_4byte_selector(sig)
-            if selector in code:
-                # Bytecode alone can't tell us the guard or bound; leave them unknown.
-                found.append(FunctionSignature(name=sig.split("(")[0], selector="0x" + selector.hex()))
-        return found
+    def _capabilities(code: bytes, source: Any) -> Capabilities:
+        probed = probe_bytecode(code)
+        if source is None or not source.verified:
+            return probed
+        from_source = analyse_source(source.source or "")
+        from_abi = analyse_abi(source.abi or [])
+        return merge(merge(from_source, from_abi), probed)
+
+    def _declared_taxes(self, client: EvmClient, token: str) -> dict[str, float]:
+        """Read common public tax getters; values are normalised to percent."""
+        getters = {
+            "buy": ("buyTax()", "_buyTax()", "buyFee()", "_buyFee()", "totalBuyTax()", "buyTotalFees()", "taxFee()"),
+            "sell": ("sellTax()", "_sellTax()", "sellFee()", "_sellFee()", "totalSellTax()", "sellTotalFees()"),
+        }
+        out: dict[str, float] = {}
+        for side, names in getters.items():
+            for name in names:
+                raw = client.try_call(abi.Call(token, name, returns=("uint256",)))
+                if raw is None:
+                    continue
+                value = int(abi.Call(token, name, returns=("uint256",)).one(raw))
+                pct = float(value) if value <= 100 else value / 100.0 if value <= 10_000 else None
+                if pct is not None:
+                    out[side] = min(100.0, pct)
+                    break
+        return out
+
+    @staticmethod
+    def _token_price(discovery: PoolDiscovery, pools: list, decimals: int) -> float | None:
+        for pool in pools:
+            if pool.token_reserve and pool.quote_reserve:
+                quote_usd = discovery.quote_usd(pool.quote_token, discovery.native_price())
+                if quote_usd is not None:
+                    return pool.quote_reserve * quote_usd / pool.token_reserve
+        return None
+
+    def _holders(self, discovery: PoolDiscovery, token: str, pools: list, cfg: Any) -> HolderDistribution:
+        balances, _ = discovery.replay_balances(token)
+        if not balances:
+            return HolderDistribution()
+        supply = sum(v for v in balances.values() if v > 0)
+        if supply <= 0:
+            return HolderDistribution()
+        pair_addrs = {p.pair_address: p.dex for p in pools}
+        holders: list[Holder] = []
+        for addr, bal in sorted(balances.items(), key=lambda kv: -kv[1])[:25]:
+            if bal <= 0:
+                continue
+            label = None
+            dex_or_burn = False
+            if addr in pair_addrs:
+                label, dex_or_burn = f"{pair_addrs[addr]}_pair", True
+            elif self.registry.is_burn(addr):
+                label, dex_or_burn = "burn", True
+            elif cfg.locker_for(addr):
+                label = cfg.locker_for(addr).value
+            holders.append(
+                Holder(
+                    address=addr,
+                    share=min(1.0, bal / supply),
+                    label=label,
+                    is_contract=bool(discovery.client.get_code(addr)),
+                    is_dex_or_burn=dex_or_burn,
+                )
+            )
+        excess = sum(h.share for h in holders) - 1.0
+        if excess > 0 and holders:
+            holders[0] = holders[0].model_copy(update={"share": max(0.0, holders[0].share - excess)})
+        return HolderDistribution(holder_count=sum(1 for v in balances.values() if v > 0), top_holders=holders)

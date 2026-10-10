@@ -175,6 +175,24 @@ class ContractInspector(BaseHeuristic):
             )
         if c.trading_enabled is False:
             notes.append("trading_enabled = false at observation time")
+        if c.has_selfdestruct and not renounced:
+            flags.append(
+                self._flag(
+                    "SELFDESTRUCT_CAPABILITY",
+                    Severity.HIGH,
+                    "Contract can self-destruct",
+                    "selfdestruct is reachable – the token contract (and every balance in it) can be erased",
+                )
+            )
+        if c.has_delegatecall:
+            flags.append(
+                self._flag(
+                    "EXTERNAL_DELEGATECALL",
+                    Severity.MEDIUM,
+                    "Logic reachable via delegatecall",
+                    "delegatecall is present outside a recognised proxy pattern – behaviour can change without a code update",
+                )
+            )
 
         # --- proxy ----------------------------------------------------- #
         if c.proxy_kind in UPGRADEABLE_PROXIES:

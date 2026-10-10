@@ -179,6 +179,8 @@ class ContractMetadata(_Strict):
     has_blacklist: bool = False
     has_whitelist_only_transfers: bool = False
     can_pause_trading: bool = False
+    has_selfdestruct: bool = False
+    has_delegatecall: bool = False
     trading_enabled: bool | None = None
 
     @model_validator(mode="after")

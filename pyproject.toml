@@ -47,7 +47,7 @@ target-version = "py311"
 extend-exclude = [".venv"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "BLE"]
 ignore = [
     "E501",   # long lines in fixtures / test tables are deliberate
     "RUF001", "RUF002", "RUF003",  # unicode glyphs (≥ × →) in user-facing text are intentional

@@ -1,0 +1,169 @@
+# Per-chain registry used by the live RPC provider.
+#
+# !! Addresses below are the canonical deployments as best known at authoring
+# !! time. Verify against the protocol's own docs before relying on them in
+# !! production; a wrong factory address silently yields "no pool found".
+#
+# Keys are free-form labels; every address is case-insensitive.
+
+chains:
+  ethereum:
+    chain_id: 1
+    wrapped_native: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"   # WETH
+    native_symbol: ETH
+    quote_tokens:
+      WETH: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2"
+      USDC: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+      USDT: "0xdAC17F958D2ee523a2206206994597C13D831ec7"
+      DAI:  "0x6B175474E89094C44Da98b954EedeAC495271d0F"
+    stablecoins: [USDC, USDT, DAI]
+    native_price_source:
+      kind: v2_pair
+      address: "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc"       # Uniswap v2 USDC/WETH
+      stable: USDC
+    dexes:
+      uniswap_v2:
+        kind: v2
+        factory: "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f"
+        router:  "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D"
+      sushiswap_v2:
+        kind: v2
+        factory: "0xC0AEe478e3658e2610c5F7A4A2E1777cE9e4f2Ac"
+        router:  "0xd9e1cE17f2641f24aE83637ab66a2cca9C378B9F"
+      uniswap_v3:
+        kind: v3
+        factory: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
+        router:  "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+        fee_tiers: [500, 3000, 10000]
+    lockers:
+      uncx:         ["0x663A5C229c09b049E36dCc11a9B0d4a8Eb9db214", "0x17e00383A843A9922bCA3B280C0ADE9f8BA48449"]
+      team_finance: ["0xE2fE530C047f2d85298b07D9333C05737f1435fB"]
+      pinklock:     ["0x71B5759d73262FBb223956913ecF4ecC51057641"]
+    mixers:
+      "Tornado Cash: 0.1 ETH": "0x12D66f87A04A9E220743712cE6d9bB1B5616B8Fc"
+      "Tornado Cash: 1 ETH":   "0x47CE0C6eD5B0Ce3d3A51fdb1C52DC66a7c3c2936"
+      "Tornado Cash: 10 ETH":  "0x910Cbd523D972eb0a6f4cAe4618aD62622b39DbF"
+      "Tornado Cash: 100 ETH": "0xA160cdAB225685dA1d56aa342Ad8841c3b53f291"
+      "Tornado Cash: Router":  "0xd90e2f925DA726b50C4Ed8D0Fb90Ad053324F31b"
+      "Railgun: Relay":        "0xFA7093CDD9EE6932B4eb2c9e1cde7CE00B1FA4b9"
+    privacy_exchanges:
+      "FixedFloat": "0x4E5B2e1dc63F6b91cb6Cd759936495434C7e972F"
+    cex_hot_wallets:
+      "Binance 14": "0x28C6c06298d514Db089934071355E5743bf21d60"
+      "Binance 15": "0x21a31Ee1afC51d94C2eFcCAa2092aD1028285549"
+      "Coinbase 1": "0x71660c4005BA85c37ccec55d0C4493E66Fe775d3"
+      "Kraken 4":   "0x267be1C1D684F78cb4F6a176C4911b741E4Ffdc0"
+      "OKX":        "0x6cC5F688a315f3dC28A7781717a9A798a59fDA7b"
+    explorer_api: "https://api.etherscan.io/v2/api"
+
+  bsc:
+    chain_id: 56
+    wrapped_native: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"   # WBNB
+    native_symbol: BNB
+    quote_tokens:
+      WBNB: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"
+      BUSD: "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56"
+      USDT: "0x55d398326f99059fF775485246999027B3197955"
+      USDC: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d"
+    stablecoins: [BUSD, USDT, USDC]
+    native_price_source:
+      kind: v2_pair
+      address: "0x16b9a82891338f9bA80E2D6970FddA79D1eb0daE"       # PancakeSwap v2 WBNB/USDT
+      stable: USDT
+    dexes:
+      pancakeswap_v2:
+        kind: v2
+        factory: "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73"
+        router:  "0x10ED43C718714eb63d5aA57B78B54704E256024E"
+      pancakeswap_v3:
+        kind: v3
+        factory: "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865"
+        router:  "0x13f4EA83D0bd40E75C8222255bc855a974568Dd4"
+        fee_tiers: [100, 500, 2500, 10000]
+    lockers:
+      uncx:         ["0xC765bddB93b0D1c1A88282BA0fa6B2d00E3e0c83"]
+      team_finance: ["0x0C89C0407775dd89b12918B9c0aa42Bf96518820"]
+      pinklock:     ["0x407993575c91ce7643a4d4cCB9f2b3f7D6e4e0b8", "0x7ee058420e5937496F5a2096f04caA7721cFBD2c"]
+    mixers:
+      "Tornado Cash: 1 BNB":   "0x84443CFd09A48AF6eF360C6976C5392aC5023a1F"
+      "Tornado Cash: 10 BNB":  "0xd47438C816c9E7f2E2888E060936a499Af9582b3"
+      "Tornado Cash: 100 BNB": "0x330bdFADE01eE9bF63C209Ee33102DD334618e0a"
+    privacy_exchanges: {}
+    cex_hot_wallets:
+      "Binance Hot 6": "0x8894E0a0c962CB723c1976a4421c95949bE2D4E3"
+    explorer_api: "https://api.etherscan.io/v2/api"
+
+  arbitrum:
+    chain_id: 42161
+    wrapped_native: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1"   # WETH
+    native_symbol: ETH
+    quote_tokens:
+      WETH: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1"
+      USDC: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"
+      USDT: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9"
+    stablecoins: [USDC, USDT]
+    native_price_source:
+      kind: v3_pool
+      address: "0xC6962004f452bE9203591991D15f6b388e09E8D0"       # Uniswap v3 WETH/USDC 0.05%
+      stable: USDC
+    dexes:
+      uniswap_v3:
+        kind: v3
+        factory: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
+        router:  "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+        fee_tiers: [500, 3000, 10000]
+      camelot_v2:
+        kind: v2
+        factory: "0x6EcCab422D763aC031210895C81787E87B43A652"
+        router:  "0xc873fEcbd354f5A56E00E710B90EF4201db2448d"
+      sushiswap_v2:
+        kind: v2
+        factory: "0xc35DADB65012eC5796536bD9864eD8773aBc74C4"
+        router:  "0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506"
+    lockers:
+      uncx:         ["0x6b5f9d4C7B4c0A7C8D8c7F3eD2BB3a5a3c0f4E1c"]
+      team_finance: ["0xE2fE530C047f2d85298b07D9333C05737f1435fB"]
+    mixers: {}
+    privacy_exchanges: {}
+    cex_hot_wallets: {}
+    explorer_api: "https://api.etherscan.io/v2/api"
+
+  base:
+    chain_id: 8453
+    wrapped_native: "0x4200000000000000000000000000000000000006"   # WETH
+    native_symbol: ETH
+    quote_tokens:
+      WETH: "0x4200000000000000000000000000000000000006"
+      USDC: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+    stablecoins: [USDC]
+    native_price_source:
+      kind: v3_pool
+      address: "0xd0b53D9277642d899DF5C87A3966A349A798F224"       # Uniswap v3 WETH/USDC 0.05%
+      stable: USDC
+    dexes:
+      uniswap_v2:
+        kind: v2
+        factory: "0x8909Dc15e40173Ff4699343b6eB8132c65e18eC6"
+        router:  "0x4752ba5DBc23f44D87826276BF6Fd6b1C372aD24"
+      uniswap_v3:
+        kind: v3
+        factory: "0x33128a8fC17869897dcE68Ed026d694621f6FDfD"
+        router:  "0x2626664c2603336E57B271c5C0b26F421741e481"
+        fee_tiers: [500, 3000, 10000]
+      aerodrome:
+        kind: v2
+        factory: "0x420DD381b31aEf6683db6B902084cB0FFECe40Da"
+        router:  "0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43"
+    lockers:
+      uncx:         ["0xc4E637D37113192F4F1F060DaEbD7758De7F4131"]
+      team_finance: ["0xE2fE530C047f2d85298b07D9333C05737f1435fB"]
+    mixers: {}
+    privacy_exchanges: {}
+    cex_hot_wallets:
+      "Coinbase Base": "0x4a6C6C7a2aA5fF5aB3eA40B7f2d3a1e6E9F0c2d8"
+    explorer_api: "https://api.etherscan.io/v2/api"
+
+burn_addresses:
+  - "0x0000000000000000000000000000000000000000"
+  - "0x000000000000000000000000000000000000dEaD"
+  - "0x0000000000000000000000000000000000000001"
