@@ -75,6 +75,40 @@ def test_history_without_cache_or_data(tmp_path: Path, monkeypatch):
     assert empty.exit_code == 1 and "no cached reports" in empty.output
 
 
+def test_label_backtest_and_export_roundtrip(tmp_path: Path):
+    db = tmp_path / "cache.db"
+    for name in ("sample_benign_token", "sample_honeypot", "sample_unlocked_rug"):
+        assert runner.invoke(app, ["analyze", name, "-q", "--cache", str(db)]).exit_code == 0
+
+    assert (
+        runner.invoke(app, ["label", "0x" + "11" * 20, "benign", "-c", "ethereum", "--cache", str(db)]).exit_code == 0
+    )
+    assert runner.invoke(app, ["label", "0x" + "22" * 20, "rug", "-c", "bsc", "--cache", str(db)]).exit_code == 0
+    assert runner.invoke(app, ["label", "0x" + "33" * 20, "rug", "-c", "base", "--cache", str(db)]).exit_code == 0
+    assert runner.invoke(app, ["label", "0x" + "33" * 20, "bogus", "-c", "base", "--cache", str(db)]).exit_code == 2
+    assert runner.invoke(app, ["label", "0x" + "44" * 20, "rug", "--cache", str(db)]).exit_code == 1
+
+    metrics = tmp_path / "m.json"
+    bt = runner.invoke(app, ["backtest", "--cache", str(db), "-o", str(metrics)])
+    assert bt.exit_code == 0, bt.output
+    assert "AUC" in bt.stdout and json.loads(metrics.read_text(encoding="utf-8"))["n"] == 3
+
+    export = tmp_path / "snaps.jsonl"
+    assert runner.invoke(app, ["export-snapshots", str(export), "--cache", str(db), "--labelled-only"]).exit_code == 0
+    assert len(export.read_text(encoding="utf-8").splitlines()) == 3
+    assert runner.invoke(app, ["backtest", "--jsonl", str(export)]).exit_code == 0
+    assert runner.invoke(app, ["backtest", "--cache", str(tmp_path / "empty.db")]).exit_code == 2
+
+
+def test_watch_mock_runs_fixed_iterations(tmp_path: Path):
+    result = runner.invoke(
+        app, ["watch", "sample_benign_token", "--iterations", "2", "--interval", "0", "--cache", str(tmp_path / "w.db")]
+    )
+    assert result.exit_code == 0, result.output
+    assert "[initial]" in result.output and "2 check(s) completed" in result.output
+    assert runner.invoke(app, ["watch", "nope", "--iterations", "1"]).exit_code == 2
+
+
 def test_list_fixtures_and_weights():
     assert "sample_honeypot" in runner.invoke(app, ["list-fixtures"]).stdout
     weights = runner.invoke(app, ["weights"])

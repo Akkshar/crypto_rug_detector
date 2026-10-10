@@ -14,14 +14,19 @@ and reported, never silently zero-filled.
 
 from __future__ import annotations
 
+import hashlib
+import logging
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 
 import numpy as np
 from sklearn.ensemble import GradientBoostingClassifier, IsolationForest
 
 from config.settings import MLConfig, RiskConfig
 from src.models.risk_report import TokenSnapshot
+
+log = logging.getLogger("rugscan.ml")
 
 FEATURE_NAMES: tuple[str, ...] = (
     "top10_concentration",
@@ -160,9 +165,10 @@ class MLPrediction:
 class RugRiskModel:
     name = "gbm+isoforest/synthetic-v1"
 
-    def __init__(self, ml_config: MLConfig):
+    def __init__(self, ml_config: MLConfig, dataset: tuple[np.ndarray, np.ndarray] | None = None):
         self.cfg = ml_config
-        X, y = generate_synthetic_dataset(ml_config.n_samples, ml_config.seed)
+        X, y = dataset if dataset is not None else generate_synthetic_dataset(ml_config.n_samples, ml_config.seed)
+        self.trained_on = "synthetic" if dataset is None else "labelled"
         Xt = _transform(X)
         self.classifier = GradientBoostingClassifier(
             n_estimators=150, max_depth=3, learning_rate=0.08, random_state=ml_config.seed
@@ -172,6 +178,9 @@ class RugRiskModel:
         # Anything more anomalous than (1 - ood_percentile) of the training set is "novel".
         self.ood_threshold = float(np.quantile(scores, 1.0 - ml_config.ood_percentile))
         self.train_accuracy = float((self.classifier.predict(Xt) == y).mean())
+        # Per-feature reference points for the what-if explanations.
+        self.medians = {name: float(np.median(X[:, i])) for i, name in enumerate(FEATURE_NAMES)}
+        self.n_train = len(y)
 
     def predict(self, features: FeatureVector) -> MLPrediction:
         x = _transform(features.as_array())
@@ -183,11 +192,69 @@ class RugRiskModel:
             is_out_of_distribution=score < self.ood_threshold,
         )
 
+    def explain(self, features: FeatureVector) -> dict[str, float]:
+        """Marginal contribution of each feature: P(rug | x) − P(rug | x with feature_i at its training median).
+
+        Positive values push the verdict toward "rug". Dependency-free alternative to SHAP that is exact for
+        the question an analyst actually asks ("what if this one thing were normal?").
+        """
+        base = float(self.classifier.predict_proba(_transform(features.as_array()))[0, 1])
+        out: dict[str, float] = {}
+        for name in FEATURE_NAMES:
+            counterfactual = dict(features.values)
+            counterfactual[name] = self.medians[name]
+            x = _transform(np.array([[counterfactual[n] for n in FEATURE_NAMES]], dtype=float))
+            out[name] = round(base - float(self.classifier.predict_proba(x)[0, 1]), 4)
+        return out
+
     def feature_importances(self) -> dict[str, float]:
         return dict(zip(FEATURE_NAMES, map(float, self.classifier.feature_importances_), strict=True))
 
+    # ------------------------------------------------------------------ #
+    # persistence
+    # ------------------------------------------------------------------ #
+    def fingerprint(self) -> str:
+        return model_fingerprint(self.cfg, self.trained_on)
+
+    def save(self, directory: Path) -> Path:
+        import joblib
+
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{self.fingerprint()}.joblib"
+        joblib.dump(self, path)
+        return path
+
+    @classmethod
+    def load(cls, path: Path) -> RugRiskModel:
+        import joblib
+
+        model = joblib.load(path)
+        if not isinstance(model, cls):
+            raise TypeError(f"{path} does not contain a {cls.__name__}")
+        return model
+
+
+def model_fingerprint(ml_config: MLConfig, trained_on: str = "synthetic") -> str:
+    import sklearn
+
+    raw = f"{RugRiskModel.name}|{trained_on}|{sklearn.__version__}|{ml_config.model_dump_json()}|{FEATURE_NAMES}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
 
 @lru_cache(maxsize=4)
-def get_model(ml_config: MLConfig) -> RugRiskModel:
-    """Train once per (n_samples, seed, …) and reuse across scorings."""
-    return RugRiskModel(ml_config)
+def get_model(ml_config: MLConfig, cache_dir: Path | None = None) -> RugRiskModel:
+    """Load a persisted model for this configuration, or train once and persist it."""
+    if cache_dir is not None:
+        path = Path(cache_dir) / f"{model_fingerprint(ml_config)}.joblib"
+        if path.exists():
+            try:
+                return RugRiskModel.load(path)
+            except Exception as exc:  # noqa: BLE001 - a stale/corrupt pickle must not break scoring
+                log.warning("ignoring unreadable model cache %s: %s", path, exc)
+    model = RugRiskModel(ml_config)
+    if cache_dir is not None:
+        try:
+            model.save(Path(cache_dir))
+        except OSError as exc:
+            log.warning("could not persist model to %s: %s", cache_dir, exc)
+    return model

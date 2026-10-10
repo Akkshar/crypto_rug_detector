@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from config.settings import RiskConfig, load_risk_config
+from config.settings import RiskConfig, get_settings, load_risk_config
 from src.heuristics import build_heuristics
 from src.heuristics.base import BaseHeuristic
 from src.models.ml_model import RugRiskModel, extract_features, get_model
@@ -47,7 +47,7 @@ class ScoringEngine:
         self.heuristics = heuristics if heuristics is not None else build_heuristics(self.config)
         self.model: RugRiskModel | None
         if self.config.ml.enabled:
-            self.model = model or get_model(self.config.ml)
+            self.model = model or get_model(self.config.ml, get_settings().model_cache_dir)
         else:
             self.model = None
 
@@ -112,8 +112,11 @@ class ScoringEngine:
             is_out_of_distribution=pred.is_out_of_distribution,
             imputed_features=list(fv.imputed),
             features=fv.values,
+            contributions=self.model.explain(fv),
             reliable=reliable,
         )
+        drivers = ", ".join(f"{name} {delta:+.2f}" for name, delta in assessment.top_drivers(3))
+        log.info("[dim]ML drivers:[/dim] %s", drivers or "none")
         log.info(
             "[bold]ML refinement:[/bold] rug_probability=%.2f anomaly=%.3f ood=%s imputed=%s",
             pred.rug_probability,

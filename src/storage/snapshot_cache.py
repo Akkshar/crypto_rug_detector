@@ -238,6 +238,16 @@ class SnapshotCache:
                 n += 1
         return n
 
+    def prior_rugs_by_deployer(self, deployer: str) -> tuple[int | None, list[str]]:
+        """Tokens labelled 'rug' whose contract.deployer matches – feeds DeployerProfile.prior_rug_count."""
+        rows = self._conn.execute(
+            "SELECT DISTINCT address FROM snapshots WHERE label='rug' AND json_extract(payload, '$.contract.deployer')=?",
+            (to_checksum_address(deployer),),
+        ).fetchall()
+        linked = [r["address"] for r in rows]
+        has_labels = self._conn.execute("SELECT 1 FROM snapshots WHERE label IS NOT NULL LIMIT 1").fetchone()
+        return (len(linked) if has_labels else None), linked
+
     def stats(self) -> dict[str, int]:
         q = self._conn.execute
         return {

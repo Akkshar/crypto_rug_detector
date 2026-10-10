@@ -62,14 +62,15 @@ def _open_cache(cache: Path | None) -> SnapshotCache | None:
     return SnapshotCache(path) if path else None
 
 
-def _build_snapshot(
+def _make_provider(
     provider_kind: ProviderKind,
     target: str,
     chain: Chain | None,
     fixtures: Path | None,
     cache: SnapshotCache | None = None,
     max_age: timedelta | None = None,
-) -> tuple[BaseDataProvider, TokenSnapshot]:
+) -> tuple[BaseDataProvider, Chain, str]:
+    """Resolve the provider, chain and canonical target address without fetching."""
     settings = get_settings()
     provider: BaseDataProvider
     if provider_kind is ProviderKind.MOCK:
@@ -81,12 +82,25 @@ def _build_snapshot(
     else:
         from src.ingestion.rpc_provider import RPCDataProvider
 
-        provider = RPCDataProvider(settings)
+        # Labelled rugs in the cache feed DeployerProfile.prior_rug_count for live scans.
+        provider = RPCDataProvider(settings, prior_rug_lookup=cache.prior_rugs_by_deployer if cache else None)
         chain = chain or Chain.ETHEREUM
         if not asyncio.run(provider.supports(chain)):
             raise ProviderError(f"no RPC URL configured for {chain.value}; set RUGSCAN_{chain.value.upper()}_RPC_URL")
     if cache is not None:
         provider = CachingProvider(provider, cache, max_age)
+    return provider, chain, target
+
+
+def _build_snapshot(
+    provider_kind: ProviderKind,
+    target: str,
+    chain: Chain | None,
+    fixtures: Path | None,
+    cache: SnapshotCache | None = None,
+    max_age: timedelta | None = None,
+) -> tuple[BaseDataProvider, TokenSnapshot]:
+    provider, chain, target = _make_provider(provider_kind, target, chain, fixtures, cache, max_age)
     return provider, asyncio.run(provider.fetch_snapshot(chain, target))
 
 
@@ -143,6 +157,136 @@ def analyze(
 
     if fail_on and TIER_ORDER.index(report.risk_tier) >= TIER_ORDER.index(fail_on):
         raise typer.Exit(code=1)
+
+
+@app.command()
+def watch(
+    target: Annotated[str, typer.Argument(help="Token address, or a fixture name when --provider mock")],
+    chain: Annotated[Chain | None, typer.Option("--chain", "-c")] = None,
+    provider: Annotated[ProviderKind, typer.Option("--provider", "-p")] = ProviderKind.MOCK,
+    fixtures: Annotated[Path | None, typer.Option(help="Fixture directory for the mock provider")] = None,
+    weights: Annotated[Path | None, typer.Option(help="Alternative risk_weights.yaml")] = None,
+    cache: Annotated[Path | None, typer.Option(help="SQLite cache; keeps history across restarts")] = None,
+    interval: Annotated[float, typer.Option(help="Seconds between checks")] = 60.0,
+    iterations: Annotated[int | None, typer.Option(help="Stop after N checks (default: run until Ctrl-C)")] = None,
+    webhook: Annotated[
+        str | None, typer.Option(help="Discord/Slack-style webhook URL (or RUGSCAN_WEBHOOK_URL)")
+    ] = None,
+    liquidity_drop: Annotated[float, typer.Option(help="Alert when liquidity falls by this many percent")] = 30.0,
+    log_level: Annotated[str, typer.Option(help="DEBUG / INFO / WARNING / ERROR")] = "WARNING",
+) -> None:
+    """Re-score a token on an interval and alert on escalation, liquidity drops or LP leaving lockers."""
+    from src.watch import ConsoleNotifier, TokenWatcher, WebhookNotifier
+
+    _utf8_stdout()
+    configure_logging(log_level, console=err)
+    store = _open_cache(cache)
+    try:
+        config = load_risk_config(weights)
+        data_provider, resolved_chain, address = _make_provider(provider, target, chain, fixtures, store, None)
+    except (SnapshotNotFound, ProviderError, FileNotFoundError, ValueError) as exc:
+        err.print(f"[bold red]error:[/bold red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    notifiers: list = [ConsoleNotifier(err)]
+    settings = get_settings()
+    hook = webhook or (settings.webhook_url.get_secret_value() if settings.webhook_url else None)
+    if hook:
+        notifiers.append(WebhookNotifier(hook))
+
+    watcher = TokenWatcher(
+        data_provider, ScoringEngine(config), notifiers, cache=store, liquidity_drop_pct=liquidity_drop
+    )
+    err.print(f"[dim]watching {address} on {resolved_chain.value} every {interval:g}s – Ctrl-C to stop[/dim]")
+    try:
+        n = asyncio.run(watcher.run(resolved_chain, address, interval_s=interval, max_iterations=iterations))
+    except KeyboardInterrupt:
+        n = -1
+    finally:
+        if store is not None:
+            store.close()
+    if n >= 0:
+        err.print(f"[dim]{n} check(s) completed[/dim]")
+
+
+@app.command()
+def label(
+    address: Annotated[str, typer.Argument(help="Token address")],
+    verdict: Annotated[str, typer.Argument(help="rug | benign | clear")],
+    chain: Annotated[Chain, typer.Option("--chain", "-c")] = Chain.ETHEREUM,
+    cache: Annotated[Path | None, typer.Option(help="SQLite cache (or RUGSCAN_CACHE_PATH)")] = None,
+) -> None:
+    """Attach ground truth to a cached token so it feeds backtests and deployer prior-rug counts."""
+    from src.backtest.harness import parse_label
+
+    store = _open_cache(cache)
+    if store is None:
+        err.print("[bold red]error:[/bold red] no cache given; pass --cache or set RUGSCAN_CACHE_PATH")
+        raise typer.Exit(code=2)
+    value = None if verdict.lower() == "clear" else verdict.lower()
+    if value is not None and parse_label(value) is None:
+        err.print(f"[bold red]error:[/bold red] unknown verdict {verdict!r}; use rug, benign or clear")
+        raise typer.Exit(code=2)
+    try:
+        updated = store.set_label(chain, address, value)
+    finally:
+        store.close()
+    if not updated:
+        err.print(f"no cached snapshots for {address} on {chain.value} – analyze it with --cache first")
+        raise typer.Exit(code=1)
+    out.print(f"labelled {updated} snapshot(s) of {address} as {value or 'unlabelled'}")
+
+
+@app.command()
+def backtest(
+    cache: Annotated[Path | None, typer.Option(help="SQLite cache with labelled snapshots")] = None,
+    jsonl: Annotated[Path | None, typer.Option(help="JSONL export (see export-snapshots) with labels")] = None,
+    weights: Annotated[Path | None, typer.Option(help="Alternative risk_weights.yaml to evaluate")] = None,
+    positive_tier: Annotated[
+        RiskTier, typer.Option(help="Tier at/above which a token counts as flagged")
+    ] = RiskTier.HIGH,
+    json_out: Annotated[Path | None, typer.Option("--json-out", "-o", help="Write metrics JSON here")] = None,
+    quiet: Annotated[bool, typer.Option("--quiet", "-q")] = True,
+) -> None:
+    """Score every labelled snapshot and report AUC, precision/recall and per-flag lift."""
+    import json
+
+    from src.backtest import load_labelled, render_backtest, run_backtest
+
+    _utf8_stdout()
+    configure_logging("CRITICAL" if quiet else "INFO", console=err)
+    store = _open_cache(cache)
+    try:
+        items = load_labelled(cache=store, jsonl=jsonl)
+    finally:
+        if store is not None:
+            store.close()
+    if not items:
+        err.print("[bold red]error:[/bold red] no labelled snapshots found; use `label` or pass --jsonl")
+        raise typer.Exit(code=2)
+    result = run_backtest(ScoringEngine(load_risk_config(weights)), items, positive_tier=positive_tier)
+    render_backtest(result, console=out)
+    if json_out:
+        json_out.write_text(json.dumps(result.to_dict(), indent=2), encoding="utf-8")
+        err.print(f"[dim]metrics written to {json_out}[/dim]")
+
+
+@app.command("export-snapshots")
+def export_snapshots(
+    output: Annotated[Path, typer.Argument(help="Destination .jsonl")],
+    cache: Annotated[Path | None, typer.Option(help="SQLite cache (or RUGSCAN_CACHE_PATH)")] = None,
+    labelled_only: Annotated[bool, typer.Option(help="Only snapshots with a label")] = False,
+) -> None:
+    """Dump cached snapshots (with labels) to JSONL for sharing or offline backtests."""
+    store = _open_cache(cache)
+    if store is None:
+        err.print("[bold red]error:[/bold red] no cache given; pass --cache or set RUGSCAN_CACHE_PATH")
+        raise typer.Exit(code=2)
+    try:
+        n = store.export_jsonl(output, labelled_only=labelled_only)
+    finally:
+        store.close()
+    out.print(f"wrote {n} snapshot(s) to {output}")
 
 
 @app.command()

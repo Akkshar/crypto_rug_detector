@@ -39,6 +39,9 @@ def _header(report: RiskReport) -> Panel:
     if report.ml:
         suffix = "" if report.ml.reliable else "  (down-weighted: unreliable)"
         body.add_row("ML rug prob.", f"{report.ml.rug_probability:.2f}{suffix}")
+        drivers = report.ml.top_drivers(3)
+        if drivers:
+            body.add_row("ML drivers", "  ".join(f"{name} {delta:+.2f}" for name, delta in drivers))
     if report.hard_fail:
         body.add_row("Pre-filter", Text("HARD FAIL — " + "; ".join(report.hard_fail_reasons), style="bold red"))
     return Panel(body, title=title, border_style=TIER_STYLE[report.risk_tier].split(" on ")[0])

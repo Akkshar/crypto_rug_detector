@@ -379,7 +379,13 @@ class MLAssessment(_Strict):
     is_out_of_distribution: bool = False
     imputed_features: list[str] = Field(default_factory=list)
     features: dict[str, float] = Field(default_factory=dict)
+    contributions: dict[str, float] = Field(
+        default_factory=dict, description="Per-feature change in P(rug) vs. that feature at its training median"
+    )
     reliable: bool = True
+
+    def top_drivers(self, n: int = 3) -> list[tuple[str, float]]:
+        return sorted(self.contributions.items(), key=lambda kv: -abs(kv[1]))[:n]
 
 
 class RiskReport(_Strict):

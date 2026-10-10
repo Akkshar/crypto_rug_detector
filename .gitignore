@@ -7,3 +7,9 @@ __pycache__/
 dist/
 build/
 reports/
+.rugscan/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+*.db
+*.jsonl

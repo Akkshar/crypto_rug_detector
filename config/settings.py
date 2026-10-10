@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     risk_weights_path: Path = DEFAULT_WEIGHTS_PATH
     fixtures_dir: Path = DEFAULT_FIXTURES_DIR
     cache_path: Path | None = Field(None, description="SQLite snapshot/report cache; None disables caching")
+    model_cache_dir: Path | None = Field(
+        PROJECT_ROOT / ".rugscan" / "models", description="Where trained ML models are persisted; None retrains"
+    )
+    webhook_url: SecretStr | None = Field(None, description="Discord/Slack-compatible webhook for watch alerts")
     log_level: str = "INFO"
     rpc_timeout_s: float = Field(20.0, gt=0)
 
