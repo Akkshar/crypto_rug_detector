@@ -156,6 +156,41 @@ def generate_synthetic_dataset(n_samples: int, seed: int) -> tuple[np.ndarray, n
 # --------------------------------------------------------------------------- #
 
 
+def make_classifier(algorithm: str, seed: int) -> Any:
+    """The three classifier families the evaluation compares.
+
+    * ``gbm`` – gradient boosting, the default
+    * ``random_forest`` – bagged trees; robust to the feature scales and outliers typical of token data
+    * ``logistic`` – a linear baseline; if the trees cannot beat it, the features are not carrying signal
+    """
+    if algorithm == "gbm":
+        return GradientBoostingClassifier(n_estimators=150, max_depth=3, learning_rate=0.08, random_state=seed)
+    if algorithm == "random_forest":
+        from sklearn.ensemble import RandomForestClassifier
+
+        return RandomForestClassifier(
+            n_estimators=300, max_depth=6, min_samples_leaf=3, class_weight="balanced", random_state=seed, n_jobs=1
+        )
+    if algorithm == "logistic":
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.pipeline import make_pipeline
+        from sklearn.preprocessing import StandardScaler
+
+        return make_pipeline(
+            StandardScaler(), LogisticRegression(max_iter=2000, class_weight="balanced", random_state=seed)
+        )
+    raise ValueError(f"unknown algorithm {algorithm!r}")
+
+
+def _importance_of(estimator: Any) -> np.ndarray:
+    if hasattr(estimator, "feature_importances_"):
+        return np.asarray(estimator.feature_importances_, dtype=float)
+    # logistic pipeline: |standardised coefficient| normalised to sum to 1
+    final = estimator[-1] if hasattr(estimator, "__getitem__") else estimator
+    coef = np.abs(np.asarray(final.coef_, dtype=float).ravel())
+    return coef / coef.sum() if coef.sum() else coef
+
+
 @dataclass(frozen=True)
 class MLPrediction:
     rug_probability: float
@@ -177,16 +212,17 @@ class RugRiskModel:
         X, y = dataset if dataset is not None else generate_synthetic_dataset(ml_config.n_samples, ml_config.seed)
         self.trained_on = "synthetic" if dataset is None else "labelled"
         self.calibration = calibrate
+        self.algorithm = ml_config.algorithm
         Xt = _transform(X)
-        gbm = GradientBoostingClassifier(n_estimators=150, max_depth=3, learning_rate=0.08, random_state=ml_config.seed)
+        base = make_classifier(ml_config.algorithm, ml_config.seed)
         if calibrate:
             from sklearn.calibration import CalibratedClassifierCV
 
             # Calibrated probabilities mean "0.8" ≈ 80 % of such tokens rugged; needs a few of each class per fold.
             folds = max(2, min(5, int(min(y.sum(), (1 - y).sum()))))
-            self.classifier: Any = CalibratedClassifierCV(gbm, method=calibrate, cv=folds).fit(Xt, y)
+            self.classifier: Any = CalibratedClassifierCV(base, method=calibrate, cv=folds).fit(Xt, y)
         else:
-            self.classifier = gbm.fit(Xt, y)
+            self.classifier = base.fit(Xt, y)
         self.detector = IsolationForest(n_estimators=100, contamination="auto", random_state=ml_config.seed).fit(Xt)
         scores = self.detector.decision_function(Xt)
         # Anything more anomalous than (1 - ood_percentile) of the training set is "novel".
@@ -226,11 +262,12 @@ class RugRiskModel:
         return self.classifier.predict_proba(_transform(np.asarray(X, dtype=float)))[:, 1]
 
     def feature_importances(self) -> dict[str, float]:
-        clf = self.classifier
-        if hasattr(clf, "feature_importances_"):
-            importances = clf.feature_importances_
-        else:  # CalibratedClassifierCV – average the underlying boosters
-            importances = np.mean([c.estimator.feature_importances_ for c in clf.calibrated_classifiers_], axis=0)
+        estimators = (
+            [c.estimator for c in self.classifier.calibrated_classifiers_]
+            if hasattr(self.classifier, "calibrated_classifiers_")
+            else [self.classifier]
+        )
+        importances = np.mean([_importance_of(e) for e in estimators], axis=0)
         return dict(zip(FEATURE_NAMES, map(float, importances), strict=True))
 
     # ------------------------------------------------------------------ #
@@ -260,6 +297,7 @@ class RugRiskModel:
 def model_fingerprint(ml_config: MLConfig, trained_on: str = "synthetic") -> str:
     import sklearn
 
+    # ml_config includes the algorithm, so each classifier family gets its own persisted model.
     raw = f"{RugRiskModel.name}|{trained_on}|{sklearn.__version__}|{ml_config.model_dump_json()}|{FEATURE_NAMES}"
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 

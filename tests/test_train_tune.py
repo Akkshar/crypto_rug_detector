@@ -119,6 +119,34 @@ def test_memoised_engine_caches_ml(config, benign, engine):
     assert e.refine(benign) is first and len(MemoisedEngine._ml_cache) == 1
 
 
+def test_compare_models_and_algorithms(config, corpus):
+    from src.backtest import ALGORITHMS, compare_models
+
+    results = compare_models(corpus, config, folds=3)
+    assert [m.algorithm for m in results] == list(ALGORITHMS)
+    for m in results:
+        assert m.auc_mean is not None and m.ap_mean is not None and 0.0 <= m.ap_mean <= 1.0
+        assert m.precision > 0 and m.recall > 0 and m.false_negatives + round(m.recall * m.n_rug) == m.n_rug
+    assert all(m.ap_mean > 0.8 for m in results)  # the corpus is separable; even the linear baseline should get it
+
+    rf, _ = train_model(corpus, config, calibrate=None, folds=2, algorithm="random_forest")
+    assert rf.algorithm == "random_forest" and sum(rf.feature_importances().values()) == pytest.approx(1.0)
+    lr, _ = train_model(corpus, config, calibrate="sigmoid", folds=2, algorithm="logistic")
+    assert lr.algorithm == "logistic" and sum(lr.feature_importances().values()) == pytest.approx(1.0)
+    assert lr.predict_proba_matrix(build_dataset(corpus, config)[0]).shape == (40,)
+    assert model_fingerprint(config.ml) != model_fingerprint(config.ml.model_copy(update={"algorithm": "logistic"}))
+
+
+def test_pr_auc_definition():
+    from src.backtest.harness import pr_auc
+
+    assert pr_auc([0.9, 0.8, 0.1], [True, True, False]) == 1.0
+    assert pr_auc([0.9, 0.1, 0.8], [True, False, True]) == pytest.approx(1.0)  # ranking is what matters
+    assert pr_auc([0.1, 0.9], [True, False]) == pytest.approx(0.5)  # perfect inversion → AP = 0.5 for 1 of 2
+    assert pr_auc([0.5, 0.5], [True, False]) == pytest.approx(0.5)  # tie handled as one block, not split favourably
+    assert pr_auc([0.3, 0.2], [True, True]) is None and pr_auc([0.3], [False]) is None
+
+
 def test_tune_rejects_empty(config):
     with pytest.raises(ValueError):
         tune_weights(config, [])

@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 
 from config.settings import RiskConfig
-from src.backtest.harness import LabelledSnapshot, roc_auc
+from src.backtest.harness import LabelledSnapshot, pr_auc, roc_auc
 from src.models.ml_model import FEATURE_NAMES, RugRiskModel, extract_features, get_model
 
 log = logging.getLogger("rugscan.train")
@@ -36,6 +36,12 @@ class CVMetrics:
     n: int
     n_rug: int
     imputed_rows: int
+    algorithm: str = "gbm"
+    ap_mean: float | None = None  # PR-AUC across folds
+    precision: float = 0.0  # at P(rug) >= 0.5, pooled out-of-fold
+    recall: float = 0.0
+    f1: float = 0.0
+    false_negatives: int = 0  # rugs the model would have missed at 0.5
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -65,24 +71,61 @@ def cross_validate(
     folds = max(2, min(folds, int(min(y.sum(), (1 - y).sum()))))
     skf = StratifiedKFold(n_splits=folds, shuffle=True, random_state=config.ml.seed)
     aucs: list[float] = []
+    aps: list[float] = []
     preds = np.zeros_like(y)
     for train_idx, test_idx in skf.split(X, y):
         model = RugRiskModel(config.ml, dataset=(X[train_idx], y[train_idx]), calibrate=calibrate)
         p = model.predict_proba_matrix(X[test_idx])
         preds[test_idx] = p
-        auc = roc_auc(list(map(float, p)), [bool(v) for v in y[test_idx]])
+        fold_scores, fold_labels = list(map(float, p)), [bool(v) for v in y[test_idx]]
+        auc, ap = roc_auc(fold_scores, fold_labels), pr_auc(fold_scores, fold_labels)
         if auc is not None:
             aucs.append(auc)
+        if ap is not None:
+            aps.append(ap)
+    predicted = preds >= 0.5
+    actual = y >= 0.5
+    tp = int((predicted & actual).sum())
+    fp = int((predicted & ~actual).sum())
+    fn = int((~predicted & actual).sum())
+    precision = tp / (tp + fp) if tp + fp else 0.0
+    recall = tp / (tp + fn) if tp + fn else 0.0
     return CVMetrics(
         folds=folds,
         auc_mean=round(float(np.mean(aucs)), 4) if aucs else None,
         auc_std=round(float(np.std(aucs)), 4) if aucs else None,
-        accuracy=round(float(((preds >= 0.5) == (y >= 0.5)).mean()), 4),
+        accuracy=round(float((predicted == actual).mean()), 4),
         brier=round(float(np.mean((preds - y) ** 2)), 4),
         n=len(y),
         n_rug=int(y.sum()),
         imputed_rows=imputed_rows,
+        algorithm=config.ml.algorithm,
+        ap_mean=round(float(np.mean(aps)), 4) if aps else None,
+        precision=round(precision, 4),
+        recall=round(recall, 4),
+        f1=round(2 * precision * recall / (precision + recall), 4) if precision + recall else 0.0,
+        false_negatives=fn,
     )
+
+
+ALGORITHMS = ("logistic", "random_forest", "gbm")
+
+
+def compare_models(
+    items: list[LabelledSnapshot],
+    config: RiskConfig,
+    *,
+    algorithms: tuple[str, ...] = ALGORITHMS,
+    folds: int = 5,
+    calibrate: str | None = None,
+) -> list[CVMetrics]:
+    """Cross-validate every classifier family on the same folds – the baseline comparison the evaluation needs."""
+    X, y, imputed = build_dataset(items, config)
+    out: list[CVMetrics] = []
+    for algorithm in algorithms:
+        cfg = config.model_copy(update={"ml": config.ml.model_copy(update={"algorithm": algorithm})})
+        out.append(cross_validate(X, y, cfg, folds=folds, calibrate=calibrate, imputed_rows=imputed))
+    return out
 
 
 def train_model(
@@ -92,7 +135,10 @@ def train_model(
     calibrate: str | None = "sigmoid",
     folds: int = 5,
     persist_dir: Path | None = None,
+    algorithm: str | None = None,
 ) -> tuple[RugRiskModel, CVMetrics]:
+    if algorithm is not None:
+        config = config.model_copy(update={"ml": config.ml.model_copy(update={"algorithm": algorithm})})
     X, y, imputed = build_dataset(items, config)
     n_rug, n_ok = int(y.sum()), int(len(y) - y.sum())
     if len(y) < MIN_SAMPLES or min(n_rug, n_ok) < MIN_PER_CLASS:

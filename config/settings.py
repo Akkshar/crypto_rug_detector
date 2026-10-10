@@ -89,6 +89,7 @@ class PrefilterConfig(_Cfg):
 
 class MLConfig(_Cfg):
     enabled: bool = True
+    algorithm: str = Field("gbm", pattern=r"^(gbm|random_forest|logistic)$", description="Classifier family")
     n_samples: int = Field(4000, ge=200)
     seed: int = 7
     ood_percentile: float = Field(0.99, ge=0.5, le=1.0)

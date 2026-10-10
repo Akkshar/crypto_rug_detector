@@ -37,6 +37,8 @@ def test_metrics_on_separable_corpus(engine, corpus):
     result = run_backtest(engine, corpus)
     assert (result.n, result.n_rug) == (6, 3) and result.base_rate == 0.5
     assert result.auc_score == 1.0 and result.auc_rule == 1.0 and result.auc_ml == 1.0
+    assert result.ap_score == 1.0 and result.ap_rule == 1.0 and result.ap_ml == 1.0
+    assert result.to_dict()["pr_auc"]["score"] == 1.0
     assert result.at_tier.threshold == engine.config.tiers.high
     assert (result.at_tier.precision, result.at_tier.recall, result.at_tier.f1) == (1.0, 1.0, 1.0)
     assert result.best_f1.f1 == 1.0

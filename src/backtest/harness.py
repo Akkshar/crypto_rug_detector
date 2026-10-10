@@ -102,6 +102,37 @@ def roc_auc(scores: list[float], labels: list[bool]) -> float | None:
     return wins / (len(pos) * len(neg))
 
 
+def pr_auc(scores: list[float], labels: list[bool]) -> float | None:
+    """Area under the precision–recall curve as average precision (step-wise, sklearn's definition).
+
+    Preferred over ROC-AUC when rugs are rare: ROC-AUC stays high even when most high-scoring tokens are
+    benign, PR-AUC does not. The no-skill value equals the base rate.
+    """
+    n_pos = sum(labels)
+    if n_pos == 0 or n_pos == len(labels):
+        return None
+    order = sorted(range(len(scores)), key=lambda i: -scores[i])
+    tp = fp = 0
+    ap = 0.0
+    prev_recall = 0.0
+    i = 0
+    while i < len(order):
+        # Process ties as one block so equal scores cannot be split favourably.
+        j = i
+        while j < len(order) and scores[order[j]] == scores[order[i]]:
+            if labels[order[j]]:
+                tp += 1
+            else:
+                fp += 1
+            j += 1
+        recall = tp / n_pos
+        precision = tp / (tp + fp)
+        ap += (recall - prev_recall) * precision
+        prev_recall = recall
+        i = j
+    return ap
+
+
 @dataclass(frozen=True)
 class ThresholdStats:
     threshold: float
@@ -162,6 +193,9 @@ class BacktestResult:
     positive_tier: RiskTier
     at_tier: ThresholdStats
     best_f1: ThresholdStats
+    ap_score: float | None = None  # PR-AUC (average precision) of the final score
+    ap_rule: float | None = None
+    ap_ml: float | None = None
     tier_counts: dict[str, dict[str, int]] = field(default_factory=dict)  # tier -> {"rug": n, "benign": n}
     flags: list[FlagStats] = field(default_factory=list)
     hard_fail: ThresholdStats | None = None
@@ -173,6 +207,7 @@ class BacktestResult:
             "n_rug": self.n_rug,
             "base_rate": round(self.base_rate, 4),
             "auc": {"score": self.auc_score, "rule": self.auc_rule, "ml": self.auc_ml},
+            "pr_auc": {"score": self.ap_score, "rule": self.ap_rule, "ml": self.ap_ml},
             "positive_tier": self.positive_tier.value,
             "at_tier": self.at_tier.as_dict(),
             "best_f1": self.best_f1.as_dict(),
@@ -259,6 +294,9 @@ def run_backtest(
         auc_score=_r(roc_auc(scores, labels)),
         auc_rule=_r(roc_auc(rule_scores, labels)),
         auc_ml=_r(roc_auc(ml_scores, labels)),
+        ap_score=_r(pr_auc(scores, labels)),
+        ap_rule=_r(pr_auc(rule_scores, labels)),
+        ap_ml=_r(pr_auc(ml_scores, labels)),
         positive_tier=positive_tier,
         at_tier=at_tier,
         best_f1=best,
@@ -284,9 +322,12 @@ def render_backtest(result: BacktestResult, console: Console | None = None) -> N
     summary = Table(title=f"Backtest – {result.n} tokens ({result.n_rug} rugs, base rate {result.base_rate:.0%})")
     summary.add_column("Metric")
     summary.add_column("Value", justify="right")
-    summary.add_row("AUC – final score", fmt(result.auc_score))
-    summary.add_row("AUC – rule score only", fmt(result.auc_rule))
-    summary.add_row("AUC – ML probability only", fmt(result.auc_ml))
+    summary.add_row("ROC-AUC – final score", fmt(result.auc_score))
+    summary.add_row("ROC-AUC – rule score only", fmt(result.auc_rule))
+    summary.add_row("ROC-AUC – ML probability only", fmt(result.auc_ml))
+    summary.add_row(f"PR-AUC – final score (no-skill = {result.base_rate:.2f})", fmt(result.ap_score))
+    summary.add_row("PR-AUC – rule score only", fmt(result.ap_rule))
+    summary.add_row("PR-AUC – ML probability only", fmt(result.ap_ml))
     t = result.at_tier
     summary.add_row(
         f"At tier ≥ {result.positive_tier.value} (score ≥ {t.threshold:g})",

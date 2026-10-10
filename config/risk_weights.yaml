@@ -23,6 +23,7 @@ prefilter:
 
 ml:
   enabled: true
+  algorithm: gbm               # gbm | random_forest | logistic (logistic = linear baseline)
   n_samples: 4000              # synthetic training rows
   seed: 7
   ood_percentile: 0.99         # IsolationForest novelty percentile above which ML is down-weighted

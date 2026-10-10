@@ -287,13 +287,17 @@ def train(
     weights: Annotated[Path | None, typer.Option(help="risk_weights.yaml (ML section)")] = None,
     calibrate: Annotated[str, typer.Option(help="sigmoid | isotonic | none")] = "sigmoid",
     folds: Annotated[int, typer.Option(help="Cross-validation folds")] = 5,
+    algorithm: Annotated[str | None, typer.Option(help="gbm | random_forest | logistic (default from YAML)")] = None,
+    compare: Annotated[
+        bool, typer.Option(help="Cross-validate all three classifier families side by side first")
+    ] = False,
     model_dir: Annotated[Path | None, typer.Option(help="Where to persist (default RUGSCAN_MODEL_CACHE_DIR)")] = None,
     json_out: Annotated[Path | None, typer.Option("--json-out", "-o")] = None,
 ) -> None:
     """Train the ML layer on labelled snapshots (replaces the synthetic prior for this configuration)."""
     import json
 
-    from src.backtest import load_labelled, train_model
+    from src.backtest import compare_models, load_labelled, train_model
 
     _utf8_stdout()
     configure_logging("WARNING", console=err)
@@ -305,18 +309,49 @@ def train(
             store.close()
     config = load_risk_config(weights)
     target = model_dir or get_settings().model_cache_dir
+    cal = None if calibrate.lower() == "none" else calibrate
+    comparison = None
     try:
-        model, metrics = train_model(
-            items, config, calibrate=None if calibrate.lower() == "none" else calibrate, folds=folds, persist_dir=target
-        )
+        if compare:
+            comparison = compare_models(items, config, folds=folds, calibrate=cal)
+        model, metrics = train_model(items, config, calibrate=cal, folds=folds, persist_dir=target, algorithm=algorithm)
     except ValueError as exc:
         err.print(f"[bold red]error:[/bold red] {exc}")
         raise typer.Exit(code=2) from exc
 
-    table = Table(title=f"Cross-validated on {metrics.n} snapshots ({metrics.n_rug} rugs), {metrics.folds} folds")
+    if comparison:
+        cmp = Table(title="Classifier comparison (same folds)")
+        for col, just in (
+            ("Algorithm", "left"),
+            ("ROC-AUC", "right"),
+            ("PR-AUC", "right"),
+            ("F1@0.5", "right"),
+            ("FN", "right"),
+            ("Brier", "right"),
+        ):
+            cmp.add_column(col, justify=just)  # type: ignore[arg-type]
+        for m in comparison:
+            cmp.add_row(
+                m.algorithm,
+                f"{m.auc_mean:.3f}" if m.auc_mean is not None else "n/a",
+                f"{m.ap_mean:.3f}" if m.ap_mean is not None else "n/a",
+                f"{m.f1:.3f}",
+                str(m.false_negatives),
+                f"{m.brier:.4f}",
+            )
+        out.print(cmp)
+
+    table = Table(
+        title=f"{metrics.algorithm}: cross-validated on {metrics.n} snapshots ({metrics.n_rug} rugs), {metrics.folds} folds"
+    )
     table.add_column("Metric")
     table.add_column("Value", justify="right")
-    table.add_row("AUC", f"{metrics.auc_mean:.3f} ± {metrics.auc_std:.3f}" if metrics.auc_mean is not None else "n/a")
+    table.add_row(
+        "ROC-AUC", f"{metrics.auc_mean:.3f} ± {metrics.auc_std:.3f}" if metrics.auc_mean is not None else "n/a"
+    )
+    table.add_row("PR-AUC", f"{metrics.ap_mean:.3f}" if metrics.ap_mean is not None else "n/a")
+    table.add_row("Precision / Recall / F1 @0.5", f"{metrics.precision:.3f} / {metrics.recall:.3f} / {metrics.f1:.3f}")
+    table.add_row("False negatives @0.5", f"{metrics.false_negatives} of {metrics.n_rug} rugs")
     table.add_row("Accuracy @0.5", f"{metrics.accuracy:.3f}")
     table.add_row("Brier score", f"{metrics.brier:.4f}  (0.25 = coin flip)")
     table.add_row("Rows with imputed features", str(metrics.imputed_rows))
@@ -326,7 +361,10 @@ def train(
     if target:
         out.print(f"[dim]model persisted to {target} – `analyze` will now prefer it for this configuration[/dim]")
     if json_out:
-        json_out.write_text(json.dumps(metrics.as_dict(), indent=2), encoding="utf-8")
+        payload: dict[str, object] = {"selected": metrics.as_dict()}
+        if comparison:
+            payload["comparison"] = [m.as_dict() for m in comparison]
+        json_out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
 @app.command()
