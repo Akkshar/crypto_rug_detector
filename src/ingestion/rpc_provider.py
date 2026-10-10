@@ -117,6 +117,10 @@ class RPCDataProvider(BaseDataProvider):
     async def supports(self, chain: Chain) -> bool:
         return self._injected_client or self.settings.rpc_url(chain) is not None
 
+    def client_for(self, chain: Chain) -> EvmClient:
+        """The (unpinned) EVM client for a chain – used by scanners that need raw log access."""
+        return self._client(Chain(chain))
+
     def creation_block(self, chain: Chain, address: str) -> int | None:
         """Block the token contract was created in (needs the explorer for the creation tx)."""
         chain = Chain(chain)

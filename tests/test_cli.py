@@ -138,6 +138,15 @@ def test_import_corpus_train_and_tune_cli(tmp_path: Path):
     assert runner.invoke(app, ["tune", "--cache", str(tmp_path / "empty.db")]).exit_code == 2
 
 
+def test_discover_requires_rpc(monkeypatch):
+    from config.settings import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.delenv("RUGSCAN_ARBITRUM_RPC_URL", raising=False)
+    result = runner.invoke(app, ["discover", "-c", "arbitrum", "--max-rounds", "1"])
+    assert result.exit_code == 2 and "RUGSCAN_ARBITRUM_RPC_URL" in result.output
+
+
 def test_at_block_is_accepted_by_mock_provider():
     result = runner.invoke(app, ["analyze", "sample_benign_token", "--json", "-q", "--at-block", "123"])
     assert result.exit_code == 0, result.output

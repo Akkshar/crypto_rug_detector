@@ -441,6 +441,69 @@ def import_corpus(
         raise typer.Exit(code=1)
 
 
+@app.command()
+def discover(
+    chain: Annotated[Chain, typer.Option("--chain", "-c")] = Chain.ETHEREUM,
+    from_block: Annotated[int | None, typer.Option(help="Start block (default: head − lookback)")] = None,
+    lookback: Annotated[int, typer.Option(help="Blocks before head to scan when --from-block is not given")] = 2_000,
+    follow: Annotated[bool, typer.Option(help="Keep polling for new listings until Ctrl-C")] = False,
+    poll: Annotated[float, typer.Option(help="Seconds between polls when following")] = 15.0,
+    max_rounds: Annotated[int | None, typer.Option(help="Stop after N polling rounds")] = None,
+    min_tier: Annotated[RiskTier, typer.Option(help="Alert only at/above this tier")] = RiskTier.HIGH,
+    weights: Annotated[Path | None, typer.Option(help="Alternative risk_weights.yaml")] = None,
+    cache: Annotated[Path | None, typer.Option(help="SQLite cache – every scanned token is stored")] = None,
+    webhook: Annotated[
+        str | None, typer.Option(help="Discord/Slack-style webhook URL (or RUGSCAN_WEBHOOK_URL)")
+    ] = None,
+    log_level: Annotated[str, typer.Option(help="DEBUG / INFO / WARNING / ERROR")] = "WARNING",
+) -> None:
+    """Scan DEX factories for newly created pairs and score every new token (live provider only)."""
+    from config.chains import load_chain_registry
+    from src.ingestion.rpc_provider import RPCDataProvider
+    from src.watch import ConsoleNotifier, WebhookNotifier
+    from src.watch.discover import Firehose, NewPairScanner
+
+    _utf8_stdout()
+    configure_logging(log_level, console=err)
+    settings = get_settings()
+    store = _open_cache(cache)
+    provider = RPCDataProvider(
+        settings,
+        prior_rug_lookup=store.prior_rugs_by_deployer if store else None,
+        similarity_lookup=store.similar_contracts if store else None,
+    )
+    if not asyncio.run(provider.supports(chain)):
+        err.print(
+            f"[bold red]error:[/bold red] no RPC URL configured for {chain.value}; set RUGSCAN_{chain.value.upper()}_RPC_URL"
+        )
+        raise typer.Exit(code=2)
+
+    notifiers: list = [ConsoleNotifier(err)]
+    hook = webhook or (settings.webhook_url.get_secret_value() if settings.webhook_url else None)
+    if hook:
+        notifiers.append(WebhookNotifier(hook))
+    inner: BaseDataProvider = CachingProvider(provider, store, None) if store else provider
+    client = provider.client_for(chain)
+    scanner = NewPairScanner(client, chain, load_chain_registry().get(chain))
+    hose = Firehose(inner, ScoringEngine(load_risk_config(weights)), scanner, notifiers, cache=store, min_tier=min_tier)
+    err.print(
+        f"[dim]discovering new pairs on {chain.value} ({'following' if follow else 'one pass'}) – Ctrl-C to stop[/dim]"
+    )
+    try:
+        rounds = asyncio.run(
+            hose.run(
+                client, from_block=from_block, lookback=lookback, follow=follow, poll_s=poll, max_rounds=max_rounds
+            )
+        )
+    except KeyboardInterrupt:
+        rounds = -1
+    finally:
+        if store is not None:
+            store.close()
+    if rounds >= 0:
+        err.print(f"[dim]{rounds} round(s), {len(hose.reports)} token(s) scored[/dim]")
+
+
 @app.command("export-snapshots")
 def export_snapshots(
     output: Annotated[Path, typer.Argument(help="Destination .jsonl")],
