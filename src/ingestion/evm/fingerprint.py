@@ -75,6 +75,23 @@ def fingerprint(code: bytes) -> Fingerprint:
     )
 
 
+EIP1167_PREFIX = bytes.fromhex("363d3d373d3d3d363d73")
+EIP1167_SUFFIX = bytes.fromhex("5af43d82803e903d91602b57fd5bf3")
+
+
+def minimal_proxy_target(code: bytes) -> str | None:
+    """Implementation address when ``code`` is an EIP-1167 minimal proxy (clone), else None.
+
+    Token factories deploy thousands of 45-byte clones; the logic – and therefore every capability and the
+    bytecode lineage – lives at the implementation, so analysis must be redirected there.
+    """
+    if len(code) == 45 and code.startswith(EIP1167_PREFIX) and code.endswith(EIP1167_SUFFIX):
+        from eth_utils import to_checksum_address
+
+        return to_checksum_address("0x" + code[10:30].hex())
+    return None
+
+
 def jaccard(a: frozenset[str] | set[str], b: frozenset[str] | set[str]) -> float:
     if not a and not b:
         return 0.0

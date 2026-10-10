@@ -30,6 +30,15 @@ class CallReverted(RuntimeError):
         super().__init__(f"{call.signature} on {call.to} reverted: {reason or 'no reason'}")
 
 
+class LogRangeUnavailable(RuntimeError):
+    """The node refuses to serve logs for this block range even at the minimum span – typically because
+    public endpoints only keep the last N blocks of log history (publicnode BSC: ~10k blocks)."""
+
+    def __init__(self, lo: int, hi: int, reason: str):
+        self.lo, self.hi, self.reason = lo, hi, reason
+        super().__init__(f"logs for blocks {lo}-{hi} not served: {reason}")
+
+
 @dataclass(frozen=True)
 class LogEntry:
     address: str
@@ -76,6 +85,19 @@ class EvmClient(Protocol):
         self, address: str, topics: list[bytes | None], from_block: int, to_block: int | str
     ) -> list[LogEntry]: ...
 
+    def get_logs_window(
+        self,
+        address: str,
+        topics: list[bytes | None],
+        from_block: int,
+        to_block: int,
+        *,
+        chunk: int,
+        max_chunks: int | None = None,
+    ) -> tuple[list[LogEntry], int | None]:
+        """Chunked fetch that skips ranges the node refuses; returns (entries, first block actually served)."""
+        ...
+
     def get_transaction(self, tx_hash: str) -> TxInfo | None: ...
 
     def estimate_gas(
@@ -104,6 +126,10 @@ class Web3EvmClient:
         self._multicall_ok: bool | None = None
         #: Largest block span the node has accepted for eth_getLogs so far (learned on the first rejection).
         self.log_span_hint: int | None = None
+        #: Largest span that has actually succeeded – the proof that a refusal is about depth, not size.
+        self.confirmed_span: int | None = None
+        #: Oldest block the node is known to serve logs for (learned when a confirmed span is still refused).
+        self.min_served_block: int | None = None
         self.retries = 3
         self.backoff_s = 0.5
 
@@ -115,6 +141,8 @@ class Web3EvmClient:
         clone = Web3EvmClient(self.w3, self.chain_id, block=block, multicall=self.multicall)
         clone._multicall_ok = self._multicall_ok
         clone.log_span_hint = self.log_span_hint
+        clone.confirmed_span = self.confirmed_span
+        clone.min_served_block = self.min_served_block
         return clone
 
     # -- transport resilience ------------------------------------------- #
@@ -229,21 +257,44 @@ class Web3EvmClient:
 
     def _logs_adaptive(self, address: str, topics: list[bytes | None], lo: int, hi: int) -> list[LogEntry]:
         span = hi - lo + 1
+        if self.min_served_block is not None and lo < self.min_served_block:
+            raise LogRangeUnavailable(lo, hi, f"node serves logs from block {self.min_served_block} only")
         if self.log_span_hint is not None and span > self.log_span_hint:
             out: list[LogEntry] = []
             for a, b in chunked_ranges(lo, hi, self.log_span_hint):
                 out.extend(self._logs_adaptive(address, topics, a, b))
             return out
         try:
-            return self._fetch_logs(address, topics, lo, hi)
+            got = self._fetch_logs(address, topics, lo, hi)
         except Exception as exc:
-            if not is_range_limit(exc) or span <= self.LOG_MIN_SPAN:
+            if not is_range_limit(exc):
                 raise
+            # Only a span the node has *actually accepted* before proves that splitting cannot help; the
+            # tentative hint set on rejection is not proof. Then the refusal is about depth – the node does
+            # not keep history this old – and we remember the boundary.
+            if span <= self.LOG_MIN_SPAN or (self.confirmed_span is not None and span <= self.confirmed_span):
+                self.min_served_block = max(self.min_served_block or 0, hi + 1)
+                log.info("eth_getLogs refused for blocks %d-%d (%s) – node history starts later", lo, hi, _short(exc))
+                raise LogRangeUnavailable(lo, hi, _short(exc)) from exc
             half = max(self.LOG_MIN_SPAN, span // 2)
             self.log_span_hint = half if self.log_span_hint is None else min(self.log_span_hint, half)
             log.info("eth_getLogs span %d rejected by node (%s); splitting to %d", span, _short(exc), half)
             mid = lo + half - 1
             return self._logs_adaptive(address, topics, lo, mid) + self._logs_adaptive(address, topics, mid + 1, hi)
+        self.confirmed_span = max(self.confirmed_span or 0, span)
+        return got
+
+    def get_logs_window(
+        self,
+        address: str,
+        topics: list[bytes | None],
+        from_block: int,
+        to_block: int,
+        *,
+        chunk: int,
+        max_chunks: int | None = None,
+    ) -> tuple[list[LogEntry], int | None]:
+        return _window(self, address, topics, from_block, to_block, chunk=chunk, max_chunks=max_chunks)
 
     def _fetch_logs(self, address: str, topics: list[bytes | None], lo: int, hi: int) -> list[LogEntry]:
         params = {
@@ -316,6 +367,7 @@ class FakeEvmClient:
     gas: dict[tuple[str, str], int] = field(default_factory=dict)
     latest_block: int = 20_000_000
     block: int | None = None
+    min_served_block: int | None = None  # emulate a public node that only keeps recent log history
     timestamps: dict[int, datetime] = field(default_factory=dict)
     calls: list[Call] = field(default_factory=list)
     batches: list[int] = field(default_factory=list)  # sizes of each call_many batch, for assertions
@@ -388,6 +440,8 @@ class FakeEvmClient:
         self, address: str, topics: list[bytes | None], from_block: int, to_block: int | str
     ) -> list[LogEntry]:
         hi = min(self.block_number(), self.latest_block if to_block == "latest" else int(to_block))
+        if self.min_served_block is not None and from_block < self.min_served_block:
+            raise LogRangeUnavailable(from_block, hi, f"fake node serves logs from block {self.min_served_block} only")
         addr = to_checksum_address(address)
         out = []
         for entry in self.logs:
@@ -397,6 +451,18 @@ class FakeEvmClient:
                 continue
             out.append(entry)
         return out
+
+    def get_logs_window(
+        self,
+        address: str,
+        topics: list[bytes | None],
+        from_block: int,
+        to_block: int,
+        *,
+        chunk: int,
+        max_chunks: int | None = None,
+    ) -> tuple[list[LogEntry], int | None]:
+        return _window(self, address, topics, from_block, to_block, chunk=chunk, max_chunks=max_chunks)
 
     def get_transaction(self, tx_hash: str) -> TxInfo | None:
         return self.transactions.get(tx_hash)
@@ -419,6 +485,8 @@ _RANGE_LIMIT_MARKERS = (
     "response size",
     "max results",
     "exceeds the limit",
+    "400 client error",  # some gateways (drpc) answer an oversized getLogs with a bare HTTP 400
+    "403 client error",  # publicnode answers one with 403 – only ever consulted on the getLogs path
 )
 # Transport-level hiccups worth a retry. Checked *first*: "429 Too Many Requests" must never be mistaken
 # for a range limit (it would be split forever instead of retried).
@@ -447,6 +515,39 @@ def is_transient(exc: BaseException) -> bool:
 def is_range_limit(exc: BaseException) -> bool:
     msg = _short(exc).lower()
     return not is_transient(exc) and any(m in msg for m in _RANGE_LIMIT_MARKERS)
+
+
+def _window(
+    client: Any,
+    address: str,
+    topics: list[bytes | None],
+    from_block: int,
+    to_block: int,
+    *,
+    chunk: int,
+    max_chunks: int | None,
+) -> tuple[list[LogEntry], int | None]:
+    """Shared chunked-window loop: skip ranges the node refuses, report where served history starts."""
+    entries: list[LogEntry] = []
+    first_served: int | None = None
+    skipped = 0
+    for i, (lo, hi) in enumerate(chunked_ranges(from_block, to_block, chunk)):
+        if max_chunks is not None and i >= max_chunks:
+            log.warning("log window for %s truncated after %d chunks", address, max_chunks)
+            break
+        try:
+            got = client.get_logs(address, topics, lo, hi)
+        except LogRangeUnavailable:
+            skipped += 1
+            continue
+        if first_served is None:
+            first_served = lo
+        entries.extend(got)
+    if skipped:
+        log.info(
+            "%s: %d chunk(s) of log history not served by the node; window starts at %s", address, skipped, first_served
+        )
+    return entries, first_served
 
 
 def topic_address(address: str) -> bytes:

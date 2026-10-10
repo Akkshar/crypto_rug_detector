@@ -59,6 +59,16 @@ def test_metadata_stripping_changes_nothing_but_the_trailer():
     assert fingerprint(code).code_hash == fingerprint(different_ipfs).code_hash
 
 
+def test_minimal_proxy_detection():
+    from src.ingestion.evm.fingerprint import EIP1167_PREFIX, EIP1167_SUFFIX, minimal_proxy_target
+
+    impl = to_checksum_address("0x" + "4f" * 20)
+    clone = EIP1167_PREFIX + bytes.fromhex(impl[2:]) + EIP1167_SUFFIX
+    assert len(clone) == 45 and minimal_proxy_target(clone) == impl
+    assert minimal_proxy_target(dispatcher(*ERC20)) is None
+    assert minimal_proxy_target(clone[:-1]) is None  # truncated → not a clone
+
+
 def test_jaccard_similarity():
     rug = fingerprint(dispatcher(*ERC20, *RUG_EXTRAS))
     clone = fingerprint(dispatcher(*ERC20, *RUG_EXTRAS[:3], "setFee(uint256)"))

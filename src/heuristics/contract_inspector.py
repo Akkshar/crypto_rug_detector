@@ -114,35 +114,46 @@ class ContractInspector(BaseHeuristic):
             )
 
         # --- minting --------------------------------------------------- #
+        # One flag per *capability*, not per function: a contract exposing mint(address,uint256) and
+        # mint(uint256) has one problem, not two (a live scan of CAKE double-counted this).
+        hidden_mints: list[FunctionSignature] = []
+        privileged_mints: list[FunctionSignature] = []
         for fn in c.mint_functions:
             role = (fn.restricted_to or "").lower()
             if fn.hidden:
-                flags.append(
-                    self._flag(
-                        "HIDDEN_MINT_FUNCTION",
-                        Severity.CRITICAL,
-                        "Hidden supply-expansion function",
-                        f"{fn.name}() is not in the published ABI but can expand supply (guard: {fn.restricted_to or 'none'})",
-                        function=fn.name,
-                        selector=fn.selector,
-                        restricted_to=fn.restricted_to,
-                    )
-                )
+                hidden_mints.append(fn)
             elif role in GOVERNANCE_ROLES:
                 notes.append(f"{fn.name}() is mint-capable but gated by governance role '{fn.restricted_to}'")
             elif renounced and role in {"onlyowner", "owner"}:
                 notes.append(f"{fn.name}() is owner-gated and ownership is renounced – inert")
             else:
-                flags.append(
-                    self._flag(
-                        "MINT_FUNCTION_PRIVILEGED",
-                        Severity.HIGH,
-                        "Mint callable by a non-governance role",
-                        f"{fn.name}() can expand supply; guard = {fn.restricted_to or 'PUBLIC'}",
-                        function=fn.name,
-                        restricted_to=fn.restricted_to,
-                    )
+                privileged_mints.append(fn)
+        if hidden_mints:
+            names = ", ".join(f"{fn.name}()" for fn in hidden_mints)
+            flags.append(
+                self._flag(
+                    "HIDDEN_MINT_FUNCTION",
+                    Severity.CRITICAL,
+                    "Hidden supply-expansion function",
+                    f"{names} not in the published ABI but can expand supply "
+                    f"(guard: {hidden_mints[0].restricted_to or 'none'})",
+                    functions=[fn.name for fn in hidden_mints],
+                    selectors=[fn.selector for fn in hidden_mints],
+                    restricted_to=hidden_mints[0].restricted_to,
                 )
+            )
+        if privileged_mints:
+            names = ", ".join(f"{fn.name}()" for fn in privileged_mints)
+            flags.append(
+                self._flag(
+                    "MINT_FUNCTION_PRIVILEGED",
+                    Severity.HIGH,
+                    "Mint callable by a non-governance role",
+                    f"{names} can expand supply; guard = {privileged_mints[0].restricted_to or 'PUBLIC'}",
+                    functions=[fn.name for fn in privileged_mints],
+                    restricted_to=privileged_mints[0].restricted_to,
+                )
+            )
 
         # --- trading gates --------------------------------------------- #
         if c.has_blacklist and not renounced:
@@ -184,7 +195,7 @@ class ContractInspector(BaseHeuristic):
                     "selfdestruct is reachable – the token contract (and every balance in it) can be erased",
                 )
             )
-        if c.has_delegatecall:
+        if c.has_delegatecall and c.proxy_kind is not ProxyKind.MINIMAL:  # a clone's delegatecall *is* the pattern
             flags.append(
                 self._flag(
                     "EXTERNAL_DELEGATECALL",

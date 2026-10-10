@@ -89,6 +89,11 @@ class SellSimulator:
         if self.cfg.quote_tokens.get(pool.quote_token) != self.cfg.wrapped_native:
             log.info("sell simulation skipped: %s pool is not quoted in native", pool.quote_token)
             return None
+        if (pool.token_reserve is not None and pool.token_reserve <= 0) or (
+            pool.quote_reserve is not None and pool.quote_reserve <= 0
+        ):
+            # A freshly created pair before liquidity is added: nothing to trade against, nothing to conclude.
+            return self._failed("pool has no liquidity yet – nothing to simulate")
         if dex.kind is DexKind.V3:
             return self._simulate_v3(token, pool, dex)
 
@@ -105,7 +110,7 @@ class SellSimulator:
 
         received, reason = self._max_output(buy_call, buy_quote, funded)
         if received is None:
-            return self._failed(f"buy reverted: {reason}")
+            return self._failed(f"buy reverted: {reason}", attempted=True)
         buy_gas = self._gas(buy_call(0), funded)
         effective_buy_tax = self._tax_pct(received, buy_quote)
 
@@ -188,7 +193,7 @@ class SellSimulator:
             lambda m: exact_input(wn, token, self.buy_amount, m, self.buy_amount), buy_quote, funded
         )
         if received is None:
-            return self._failed(f"buy reverted: {reason}")
+            return self._failed(f"buy reverted: {reason}", attempted=True)
         buy_gas = self._gas(exact_input(wn, token, self.buy_amount, 0, self.buy_amount), funded)
         effective_buy_tax = self._tax_pct(received, buy_quote)
 
@@ -263,8 +268,13 @@ class SellSimulator:
             name = name.rsplit("_", 1)[0]
         return self.cfg.dexes.get(name)
 
-    def _failed(self, reason: str, *, buy_gas: int | None = None) -> SellSimulation:
-        return SellSimulation(attempted=self.attempts, succeeded=0, buy_gas=buy_gas, revert_reason=reason)
+    def _failed(self, reason: str, *, buy_gas: int | None = None, attempted: bool = False) -> SellSimulation:
+        """``attempted=False`` means the swap could not even be tried (empty pool, no route, unknown storage
+        layout) → attempted=0, which the heuristics read as "not simulated". Only a real on-chain revert of the
+        swap itself is an *attempted and failed* sell – the honeypot signal."""
+        return SellSimulation(
+            attempted=self.attempts if attempted else 0, succeeded=0, buy_gas=buy_gas, revert_reason=reason
+        )
 
     @staticmethod
     def _tax_pct(actual: int, quote: int) -> float:

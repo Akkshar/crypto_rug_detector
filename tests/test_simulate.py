@@ -136,14 +136,21 @@ def test_unquotable_buy_and_missing_slot():
     c = FakeEvmClient(chain_id=1)
     c.returns(abi.erc20_decimals(TOKEN), 18)
     sim = simulator(c).simulate(TOKEN, pool())
-    assert sim.succeeded == 0 and "quote" in sim.revert_reason
+    # unquotable ≠ blocked: nothing was attempted, so the heuristics must read "not simulated", not "honeypot"
+    assert sim.attempted == 0 and sim.succeeded == 0 and "quote" in sim.revert_reason and sim.success_rate is None
+
+    empty = LiquidityPool(
+        dex="uniswap_v2", pair_address=PAIR, quote_token="WETH", liquidity_usd=0, token_reserve=0, quote_reserve=0
+    )
+    sim = simulator(make_client()).simulate(TOKEN, empty)
+    assert sim.attempted == 0 and "no liquidity" in sim.revert_reason
 
     c = make_client()
     # make balanceOf ignore overrides → slot search fails
     c.handlers = [h for h in c.handlers if h[1] != abi.selector("balanceOf(address)")]
     c.on_selector("balanceOf(address)", lambda call, s, snd: encode(["uint256"], [0]), to=TOKEN)
     sim = simulator(c).simulate(TOKEN, pool())
-    assert sim.succeeded == 0 and "balances storage slot" in sim.revert_reason
+    assert sim.attempted == 0 and "balances storage slot" in sim.revert_reason and sim.buy_gas is not None
 
 
 def test_slot_keys_are_solidity_layout():

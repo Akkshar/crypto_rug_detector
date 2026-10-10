@@ -33,7 +33,7 @@ from src.ingestion.evm.capabilities import Capabilities, analyse_abi, analyse_so
 from src.ingestion.evm.client import EvmClient, Web3EvmClient
 from src.ingestion.evm.deployer import find_insider_cluster, trace_deployer
 from src.ingestion.evm.explorer import EtherscanClient, Explorer
-from src.ingestion.evm.fingerprint import fingerprint
+from src.ingestion.evm.fingerprint import fingerprint, minimal_proxy_target
 from src.ingestion.evm.pools import PoolDiscovery
 from src.ingestion.evm.simulate import SellSimulator
 from src.ingestion.evm.trades import analyse_swaps
@@ -155,13 +155,20 @@ class RPCDataProvider(BaseDataProvider):
         code = client.get_code(token)
         if not code:
             raise ProviderError(f"{token} has no bytecode on {chain.value} — not a contract")
+        # Token factories deploy EIP-1167 clones: 45 bytes of delegatecall glue. Capabilities, source and the
+        # bytecode fingerprint all belong to the implementation, so analysis is redirected there.
+        logic_code, clone_target = code, minimal_proxy_target(code)
+        if clone_target:
+            logic_code = client.get_code(clone_target) or code
+            log.info("%s is an EIP-1167 clone of %s – analysing the implementation", token, clone_target)
 
         meta = self._erc20_metadata(client, token)
         owner, owner_type = self._owner(client, token)
         explorer = self._safe(lambda: self._explorer_factory(chain), "explorer init")
-        source = self._safe(lambda: explorer.get_source(token) if explorer else None, "source lookup")
-        caps = self._capabilities(code, source)
-        fp = fingerprint(code)
+        source_target = clone_target or token
+        source = self._safe(lambda: explorer.get_source(source_target) if explorer else None, "source lookup")
+        caps = self._capabilities(logic_code, source)
+        fp = fingerprint(logic_code)
         matches: list[BytecodeMatch] = []
         similarity = self._similarity_lookup
         if similarity is not None:
@@ -225,10 +232,10 @@ class RPCDataProvider(BaseDataProvider):
                 lambda: SellSimulator(client, cfg, discovery).simulate(token, pools[0]), "sell simulation"
             )
 
-        proxy_kind = ProxyKind.NONE
-        implementation = None
-        implementation_verified = None
-        if source and source.is_proxy:
+        proxy_kind = ProxyKind.MINIMAL if clone_target else ProxyKind.NONE
+        implementation = clone_target
+        implementation_verified = bool(source and source.verified) if clone_target else None
+        if source and source.is_proxy and not clone_target:
             proxy_kind = ProxyKind.UNKNOWN
             implementation = source.implementation
             if implementation and explorer is not None:

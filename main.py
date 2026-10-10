@@ -493,6 +493,10 @@ def discover(
     webhook: Annotated[
         str | None, typer.Option(help="Discord/Slack-style webhook URL (or RUGSCAN_WEBHOOK_URL)")
     ] = None,
+    replay_lookback: Annotated[
+        int, typer.Option(help="Blocks of Transfer/Swap history to replay per token (new listings need little)")
+    ] = 20_000,
+    max_tokens: Annotated[int, typer.Option(help="Score at most this many new tokens per round (oldest first)")] = 50,
     log_level: Annotated[str, typer.Option(help="DEBUG / INFO / WARNING / ERROR")] = "WARNING",
 ) -> None:
     """Scan DEX factories for newly created pairs and score every new token (live provider only)."""
@@ -509,6 +513,8 @@ def discover(
         settings,
         prior_rug_lookup=store.prior_rugs_by_deployer if store else None,
         similarity_lookup=store.similar_contracts if store else None,
+        replay_lookback=replay_lookback,
+        swap_window_blocks=replay_lookback,
     )
     if not asyncio.run(provider.supports(chain)):
         err.print(
@@ -523,7 +529,15 @@ def discover(
     inner: BaseDataProvider = CachingProvider(provider, store, None) if store else provider
     client = provider.client_for(chain)
     scanner = NewPairScanner(client, chain, load_chain_registry().get(chain))
-    hose = Firehose(inner, ScoringEngine(load_risk_config(weights)), scanner, notifiers, cache=store, min_tier=min_tier)
+    hose = Firehose(
+        inner,
+        ScoringEngine(load_risk_config(weights)),
+        scanner,
+        notifiers,
+        cache=store,
+        min_tier=min_tier,
+        max_tokens_per_round=max_tokens,
+    )
     err.print(
         f"[dim]discovering new pairs on {chain.value} ({'following' if follow else 'one pass'}) – Ctrl-C to stop[/dim]"
     )

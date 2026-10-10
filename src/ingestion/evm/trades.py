@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 from eth_utils import keccak, to_checksum_address
 
-from src.ingestion.evm.client import EvmClient, chunked_ranges
+from src.ingestion.evm.client import EvmClient
 from src.models.risk_report import TradeActivity
 
 log = logging.getLogger("rugscan.trades")
@@ -65,44 +65,44 @@ def analyse_swaps(
     truncated = False
     topic = V3_SWAP_TOPIC if kind == "v3" else SWAP_TOPIC
 
-    for lo, chunk_hi in chunked_ranges(from_block, hi, log_chunk):
-        for entry in client.get_logs(pair, [topic], lo, chunk_hi):
-            if kind == "v3":
-                if len(entry.data) < 64:
-                    continue
-                # v3: signed deltas from the pool's view – positive = paid in, negative = paid out.
-                amount0, amount1 = _signed(entry.data, 0), _signed(entry.data, 1)
-                token_delta = amount0 if token_is_token0 else amount1
-                quote_delta = amount1 if token_is_token0 else amount0
-                is_buy = token_delta < 0
-                quote_amount = abs(quote_delta)
-            else:
-                if len(entry.data) < 128:
-                    continue
-                a0_in, a1_in, a0_out, a1_out = (_word(entry.data, i) for i in range(4))
-                # token0/token1 are fixed per pair; the quote asset is whichever side the token is not.
-                token_out = a0_out if token_is_token0 else a1_out
-                quote_in = a1_in if token_is_token0 else a0_in
-                quote_out = a1_out if token_is_token0 else a0_out
-                is_buy = token_out > 0
-                quote_amount = quote_in if is_buy else quote_out
+    entries, served_from = client.get_logs_window(pair, [topic], from_block, hi, chunk=log_chunk)
+    if served_from is not None and served_from > from_block:
+        from_block = served_from  # report the window that was actually observable
+    for entry in entries:
+        if kind == "v3":
+            if len(entry.data) < 64:
+                continue
+            # v3: signed deltas from the pool's view – positive = paid in, negative = paid out.
+            amount0, amount1 = _signed(entry.data, 0), _signed(entry.data, 1)
+            token_delta = amount0 if token_is_token0 else amount1
+            quote_delta = amount1 if token_is_token0 else amount0
+            is_buy = token_delta < 0
+            quote_amount = abs(quote_delta)
+        else:
+            if len(entry.data) < 128:
+                continue
+            a0_in, a1_in, a0_out, a1_out = (_word(entry.data, i) for i in range(4))
+            # token0/token1 are fixed per pair; the quote asset is whichever side the token is not.
+            token_out = a0_out if token_is_token0 else a1_out
+            quote_in = a1_in if token_is_token0 else a0_in
+            quote_out = a1_out if token_is_token0 else a0_out
+            is_buy = token_out > 0
+            quote_amount = quote_in if is_buy else quote_out
 
-            trader: str | None
-            if entry.tx_hash in tx_cache:
-                trader = tx_cache[entry.tx_hash]
-            elif lookups < max_tx_lookups:
-                lookups += 1
-                tx = client.get_transaction(entry.tx_hash)
-                trader = tx.sender if tx else None
-                tx_cache[entry.tx_hash] = trader
-            else:
-                trader = None
-                truncated = True
-            swaps.append(SwapRecord(entry.block_number, entry.tx_hash, trader, is_buy, quote_amount))
-            if len(swaps) >= max_swaps:
-                truncated = True
-                break
+        trader: str | None
+        if entry.tx_hash in tx_cache:
+            trader = tx_cache[entry.tx_hash]
+        elif lookups < max_tx_lookups:
+            lookups += 1
+            tx = client.get_transaction(entry.tx_hash)
+            trader = tx.sender if tx else None
+            tx_cache[entry.tx_hash] = trader
+        else:
+            trader = None
+            truncated = True
+        swaps.append(SwapRecord(entry.block_number, entry.tx_hash, trader, is_buy, quote_amount))
         if len(swaps) >= max_swaps:
+            truncated = True
             break
 
     scale = 10**quote_decimals

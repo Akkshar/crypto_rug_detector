@@ -120,6 +120,24 @@ def test_v3_discovery_reports_liquidity_without_lp_holders(client):
     assert pools[0].liquidity_usd == pytest.approx(2 * 4 * 2500) and pools[0].lp_holdings == []
 
 
+def test_lp_replay_failure_keeps_the_pool(client, caplog):
+    """A node that refuses the Transfer-log replay must not make the pool disappear (→ NO_LIQUIDITY_POOL)."""
+    client.returns(abi.v2_get_pair(UNI_V2, TOKEN, WETH), PAIR)
+    client.returns(abi.v2_token0(PAIR), TOKEN)
+    client.returns(abi.v2_get_reserves(PAIR), 1_000_000 * 10**18, 10 * 10**18, 0)
+
+    class NoLogs(FakeEvmClient):
+        def get_logs(self, address, topics, from_block, to_block):
+            raise RuntimeError("403 Client Error: Forbidden")
+
+    nolog = NoLogs(**{k: getattr(client, k) for k in ("responses", "handlers", "code", "logs", "transactions", "gas")})
+    nolog.latest_block = client.latest_block
+    with caplog.at_level("WARNING", logger="rugscan.pools"):
+        pools = PoolDiscovery(nolog, ETH, REG).discover(TOKEN, deployer=DEPLOYER, owner=None)
+    assert len(pools) == 1 and pools[0].liquidity_usd == pytest.approx(50_000)
+    assert pools[0].lp_holdings == [] and "lock status unknown" in caplog.text
+
+
 def test_discovery_survives_a_broken_dex(client):
     client.reverts(abi.v2_get_pair(ETH.dexes["sushiswap_v2"].factory, TOKEN, WETH), "boom")
     assert PoolDiscovery(client, ETH, REG).discover(TOKEN, deployer=None, owner=None) == []
@@ -154,6 +172,25 @@ def test_replay_rejected_when_history_exceeds_window(client, caplog):
     assert len(PoolDiscovery(client, ETH, REG).lp_holdings_v2(PAIR, deployer=DEPLOYER, owner=None)[0]) == 1
 
 
+def test_replay_on_depth_limited_node_still_works_for_new_tokens(client):
+    """History that starts inside the node's log window replays completely; older history is rejected by the
+    totalSupply reconciliation rather than reported wrong."""
+    client.latest_block = 100
+    client.min_served_block = 50
+    client.logs += [
+        transfer_log(PAIR, ZERO_ADDRESS, DEPLOYER, 100, block=60),
+        transfer_log(PAIR, DEPLOYER, UNCX, 40, block=70),
+    ]
+    client.returns(abi.erc20_total_supply(PAIR), 100)
+    client.with_code(UNCX)
+    d = PoolDiscovery(client, ETH, REG, log_chunk=10)
+    holdings, _, created = d.lp_holdings_v2(PAIR, deployer=DEPLOYER, owner=None)
+    assert created == 60 and {h.holder: h.share for h in holdings} == {DEPLOYER: 0.6, UNCX: 0.4}
+
+    client.min_served_block = 65  # the mint at block 60 is now beyond the horizon → replay cannot reconcile
+    assert PoolDiscovery(client, ETH, REG, log_chunk=10).lp_holdings_v2(PAIR, deployer=DEPLOYER, owner=None)[0] == []
+
+
 def test_burned_to_zero_is_excluded_from_lp_total(client):
     client.logs += [
         transfer_log(PAIR, ZERO_ADDRESS, DEPLOYER, 100, block=1),
@@ -167,7 +204,7 @@ def test_burned_to_zero_is_excluded_from_lp_total(client):
 def test_log_replay_truncation_is_logged_not_fatal(client, caplog):
     client.latest_block = 10_000_000
     d = PoolDiscovery(client, ETH, REG, log_chunk=1_000_000, max_log_chunks=2)
-    with caplog.at_level("WARNING", logger="rugscan.pools"):
+    with caplog.at_level("WARNING", logger="rugscan.evm"):  # the window loop lives in the client now
         balances, _ = d.replay_balances(PAIR)
     assert balances == {} and "truncated" in caplog.text
 

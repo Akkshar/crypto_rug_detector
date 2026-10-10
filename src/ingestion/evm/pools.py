@@ -17,7 +17,7 @@ from eth_utils import keccak, to_checksum_address
 
 from config.chains import ChainConfig, ChainRegistry, DexKind
 from src.ingestion.evm import abi
-from src.ingestion.evm.client import EvmClient, address_from_topic, chunked_ranges
+from src.ingestion.evm.client import EvmClient, address_from_topic
 from src.models.risk_report import ZERO_ADDRESS, LiquidityPool, LockerKind, LPHolding
 
 log = logging.getLogger("rugscan.pools")
@@ -154,25 +154,37 @@ class PoolDiscovery:
                 log.warning("%s pool %s returned no state – skipped", dex_name, pool)
                 continue
             quote_usd = self.quote_usd(qsym, native)
+            # Reserves/balances decide whether the pool *exists*; LP ownership is a separate, best-effort
+            # lookup. A failed holder replay must leave the pool in place with lock status unknown –
+            # dropping it would wrongly raise NO_LIQUIDITY_POOL for a token that is trading.
             try:
                 if kind is DexKind.V2:
                     token0 = abi.v2_token0(pool).one(a)
                     r0, r1, _ = abi.v2_get_reserves(pool).parse(b)
                     token_res, quote_res = (r0, r1) if token0 == token else (r1, r0)
-                    holdings, created, created_block = self.lp_holdings_v2(
-                        pool, deployer=deployer, owner=owner, now=now
-                    )
                     dex_label = dex_name
                 else:
                     quote_res = abi.erc20_balance_of(quote, pool).one(a)
                     token_res = abi.erc20_balance_of(token, pool).one(b)
-                    holdings, created, created_block = self.lp_holdings_v3(
-                        dex_name, pool, token, quote, fee or 0, deployer=deployer, owner=owner
-                    )
                     dex_label = f"{dex_name}_{fee}"
             except Exception as exc:  # noqa: BLE001
                 log.warning("%s pool %s undecodable: %s", dex_name, pool, exc)
                 continue
+            holdings: list[LPHolding]
+            created: datetime | None
+            created_block: int | None
+            try:
+                if kind is DexKind.V2:
+                    holdings, created, created_block = self.lp_holdings_v2(
+                        pool, deployer=deployer, owner=owner, now=now
+                    )
+                else:
+                    holdings, created, created_block = self.lp_holdings_v3(
+                        dex_name, pool, token, quote, fee or 0, deployer=deployer, owner=owner
+                    )
+            except Exception as exc:  # noqa: BLE001
+                log.warning("%s pool %s: LP holder lookup failed (%s) – lock status unknown", dex_name, pool, exc)
+                holdings, created, created_block = [], None, None
             quote_units = quote_res / 10 ** self.decimals(quote)
             pools.append(
                 LiquidityPool(
@@ -283,23 +295,20 @@ class PoolDiscovery:
             from_block = max(0, latest - self.replay_lookback) if self.replay_lookback else 0
         balances: dict[str, int] = {}
         first_block: int | None = None
-        chunks = 0
-        for lo, hi in chunked_ranges(from_block, latest, self.log_chunk):
-            chunks += 1
-            if chunks > self.max_log_chunks:
-                log.warning("log replay for %s truncated after %d chunks", token, self.max_log_chunks)
-                break
-            for entry in self.client.get_logs(token, [TRANSFER_TOPIC], lo, hi):
-                if len(entry.topics) < 3:
-                    continue
-                sender = address_from_topic(entry.topics[1])
-                receiver = address_from_topic(entry.topics[2])
-                amount = int.from_bytes(entry.data[:32], "big") if entry.data else 0
-                if first_block is None:
-                    first_block = entry.block_number
-                if sender != ZERO_ADDRESS:
-                    balances[sender] = balances.get(sender, 0) - amount
-                balances[receiver] = balances.get(receiver, 0) + amount
+        entries, _served_from = self.client.get_logs_window(
+            token, [TRANSFER_TOPIC], from_block, latest, chunk=self.log_chunk, max_chunks=self.max_log_chunks
+        )
+        for entry in entries:
+            if len(entry.topics) < 3:
+                continue
+            sender = address_from_topic(entry.topics[1])
+            receiver = address_from_topic(entry.topics[2])
+            amount = int.from_bytes(entry.data[:32], "big") if entry.data else 0
+            if first_block is None:
+                first_block = entry.block_number
+            if sender != ZERO_ADDRESS:
+                balances[sender] = balances.get(sender, 0) - amount
+            balances[receiver] = balances.get(receiver, 0) + amount
         return balances, first_block
 
 

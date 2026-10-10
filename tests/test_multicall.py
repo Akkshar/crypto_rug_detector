@@ -160,6 +160,50 @@ def test_get_logs_adapts_to_node_range_limit_and_rate_limits():
     assert all(hi - lo + 1 <= client.log_span_hint for lo, hi in new_calls)
 
 
+def test_depth_limited_node_is_learned_and_window_skips_refused_history():
+    """publicnode-style: any query reaching deeper than `horizon` blocks is refused even at tiny spans."""
+    from src.ingestion.evm.client import LogRangeUnavailable
+
+    class DepthLimitedEth(StubEth):
+        horizon = 10_000
+
+        def get_logs(self, params):
+            if params["fromBlock"] < self.block_number - self.horizon:
+                raise RuntimeError("403 Client Error: Forbidden for url: https://node/")
+            return [
+                {
+                    "address": TOKEN,
+                    "topics": [b"\x00" * 32],
+                    "data": b"",
+                    "blockNumber": b,
+                    "transactionHash": b"\x01" * 32,
+                }
+                for b in range(params["fromBlock"], params["toBlock"] + 1)
+                if b % 500 == 0
+            ]
+
+    eth = DepthLimitedEth(FakeEvmClient())
+    eth.block_number = 100_000
+    client = Web3EvmClient(StubW3(eth), chain_id=1)
+    client.log_span_hint = client.confirmed_span = 5_000  # a span the node has accepted before
+    client.backoff_s = 0.0
+
+    with pytest.raises(LogRangeUnavailable):
+        client.get_logs(TOKEN, [None], 70_000, 74_999)
+    assert client.min_served_block is not None and client.min_served_block <= 90_001
+
+    entries, served_from = client.get_logs_window(TOKEN, [None], 60_000, 100_000, chunk=5_000)
+    assert served_from is not None and served_from >= 90_000
+    assert (
+        entries and min(e.block_number for e in entries) >= 90_000 and max(e.block_number for e in entries) == 100_000
+    )
+    # the learned boundary short-circuits later deep queries without touching the node
+    calls_before = len(eth.calls)
+    with pytest.raises(LogRangeUnavailable):
+        client.get_logs(TOKEN, [None], 10_000, 10_100)
+    assert len(eth.calls) == calls_before
+
+
 def test_non_range_errors_propagate():
     class Broken(StubEth):
         def get_logs(self, params):

@@ -21,7 +21,7 @@ from eth_utils import keccak, to_checksum_address
 
 from config.chains import ChainConfig, ChainRegistry
 from src.ingestion.evm import abi
-from src.ingestion.evm.client import EvmClient, address_from_topic, chunked_ranges, topic_address
+from src.ingestion.evm.client import EvmClient, address_from_topic, topic_address
 from src.models.risk_report import ZERO_ADDRESS, LockerKind, LPHolding
 
 log = logging.getLogger("rugscan.v3")
@@ -55,13 +55,10 @@ def owner_of_call(npm: str, token_id: int) -> abi.Call:
 def pool_created_block(client: EvmClient, pool: str, *, log_chunk: int = 50_000, max_chunks: int = 40) -> int | None:
     """Block of the pool's first ``Mint`` – the closest thing a v3 pool has to a creation event we can cheaply find."""
     latest = client.block_number()
-    for i, (lo, hi) in enumerate(chunked_ranges(0, latest, log_chunk)):
-        if i >= max_chunks:
-            break
-        entries = client.get_logs(to_checksum_address(pool), [V3_MINT_TOPIC], lo, hi)
-        if entries:
-            return min(e.block_number for e in entries)
-    return None
+    entries, _ = client.get_logs_window(
+        to_checksum_address(pool), [V3_MINT_TOPIC], 0, latest, chunk=log_chunk, max_chunks=max_chunks
+    )
+    return min((e.block_number for e in entries), default=None)
 
 
 def v3_lp_holdings(
@@ -84,13 +81,17 @@ def v3_lp_holdings(
     token0, token1 = to_checksum_address(token0), to_checksum_address(token1)
     latest = client.block_number()
 
+    entries, served_from = client.get_logs_window(
+        npm, [TRANSFER_TOPIC, topic_address(ZERO_ADDRESS)], from_block, latest, chunk=log_chunk
+    )
+    if served_from is not None and served_from > from_block:
+        # Positions minted before the node's log horizon would be invisible → ownership unknowable.
+        log.warning("v3 position history for %s starts before the node's log window – lock status unknown", pool)
+        return []
     token_ids: list[int] = []
-    for lo, hi in chunked_ranges(from_block, latest, log_chunk):
-        for entry in client.get_logs(npm, [TRANSFER_TOPIC, topic_address(ZERO_ADDRESS)], lo, hi):
-            if len(entry.topics) >= 4:
-                token_ids.append(int.from_bytes(entry.topics[3], "big"))
-            if len(token_ids) >= max_positions:
-                break
+    for entry in entries:
+        if len(entry.topics) >= 4:
+            token_ids.append(int.from_bytes(entry.topics[3], "big"))
         if len(token_ids) >= max_positions:
             log.warning("v3 position scan for %s capped at %d NPM mints", pool, max_positions)
             break

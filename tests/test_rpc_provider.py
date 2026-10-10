@@ -176,6 +176,25 @@ def test_degraded_snapshot_without_explorer_or_pools(chain, engine):
     assert {"NO_LIQUIDITY_POOL", "SOURCE_UNVERIFIED", "SELL_SIMULATION_UNAVAILABLE"} <= {f.code for f in report.flags}
 
 
+def test_clone_is_analysed_through_its_implementation(chain, engine):
+    from src.ingestion.evm.fingerprint import EIP1167_PREFIX, EIP1167_SUFFIX, fingerprint
+    from src.models.risk_report import ProxyKind
+
+    impl = to_checksum_address("0x" + "4f" * 20)
+    impl_code = b"\x60\x80" + function_signature_to_4byte_selector("setSellFee(uint256)") + b"\x60\x40"
+    chain.with_code(TOKEN, EIP1167_PREFIX + bytes.fromhex(impl[2:]) + EIP1167_SUFFIX).with_code(impl, impl_code)
+    snap = make_provider(chain).fetch_sync(Chain.ETHEREUM, TOKEN)
+
+    assert snap.contract.proxy_kind is ProxyKind.MINIMAL and snap.contract.implementation == impl
+    assert [f.name for f in snap.contract.fee_setters] == ["setSellFee"]  # probed from the implementation
+    assert snap.contract.code_hash == fingerprint(impl_code).code_hash  # lineage keyed on the shared logic
+    report = engine.score(snap, provider="rpc")
+    assert "EXTERNAL_DELEGATECALL" not in {f.code for f in report.flags}
+    assert "PROXY_UNVERIFIED_IMPLEMENTATION" not in {
+        f.code for f in report.flags
+    }  # minimal proxies are not upgradeable
+
+
 def test_not_a_contract(chain):
     with pytest.raises(ProviderError, match="no bytecode"):
         make_provider(chain).fetch_sync(Chain.ETHEREUM, "0x" + "09" * 20)
