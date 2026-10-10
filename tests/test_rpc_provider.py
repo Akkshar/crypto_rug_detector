@@ -195,6 +195,19 @@ def test_clone_is_analysed_through_its_implementation(chain, engine):
     }  # minimal proxies are not upgradeable
 
 
+def test_deployer_derived_from_mint_without_explorer(chain):
+    from src.ingestion.evm.client import TxInfo
+
+    mint_tx = "0x" + f"{9:064x}"  # transfer_log() keys tx hashes by block; the TOKEN mint is at block 9
+    chain.transactions[mint_tx] = TxInfo(mint_tx, DEPLOYER, None, 0, 9)
+    snap = make_provider(chain, explorer=None, prior_rug_lookup=lambda a: (1, ["0x" + "ff" * 20])).fetch_sync(
+        Chain.ETHEREUM, TOKEN
+    )
+    assert snap.deployer is not None and snap.deployer.address == DEPLOYER
+    assert snap.deployer.prior_rug_count == 1 and snap.deployer.first_seen is None
+    assert snap.pools[0].insider_share == pytest.approx(1.0)  # LP in the derived deployer's wallet is now recognised
+
+
 def test_not_a_contract(chain):
     with pytest.raises(ProviderError, match="no bytecode"):
         make_provider(chain).fetch_sync(Chain.ETHEREUM, "0x" + "09" * 20)

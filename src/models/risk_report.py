@@ -238,8 +238,18 @@ class LiquidityPool(_Strict):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def locked_share(self) -> float:
-        """Fraction of LP held by recognised lockers or burned."""
-        return min(1.0, sum(h.share for h in self.lp_holdings if h.locker is not None))
+        """Fraction of LP held by *recognised* lockers or burned. An unknown contract does not count: a
+        launchpad or factory may well be able to withdraw it."""
+        return min(
+            1.0,
+            sum(h.share for h in self.lp_holdings if h.locker is not None and h.locker != LockerKind.UNKNOWN_CONTRACT),
+        )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def unknown_contract_share(self) -> float:
+        """Fraction of LP sitting in contracts that are not recognised lockers."""
+        return min(1.0, sum(h.share for h in self.lp_holdings if h.locker == LockerKind.UNKNOWN_CONTRACT))
 
     @computed_field  # type: ignore[prop-decorator]
     @property

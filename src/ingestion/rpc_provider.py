@@ -30,11 +30,11 @@ from config.settings import Settings, get_settings
 from src.ingestion.base import BaseDataProvider, ProviderError
 from src.ingestion.evm import abi
 from src.ingestion.evm.capabilities import Capabilities, analyse_abi, analyse_source, merge, probe_bytecode
-from src.ingestion.evm.client import EvmClient, Web3EvmClient
+from src.ingestion.evm.client import EvmClient, Web3EvmClient, topic_address
 from src.ingestion.evm.deployer import find_insider_cluster, trace_deployer
 from src.ingestion.evm.explorer import EtherscanClient, Explorer
 from src.ingestion.evm.fingerprint import fingerprint, minimal_proxy_target
-from src.ingestion.evm.pools import PoolDiscovery
+from src.ingestion.evm.pools import TRANSFER_TOPIC, PoolDiscovery
 from src.ingestion.evm.simulate import SellSimulator
 from src.ingestion.evm.trades import analyse_swaps
 from src.models.risk_report import (
@@ -43,6 +43,7 @@ from src.models.risk_report import (
     BytecodeMatch,
     Chain,
     ContractMetadata,
+    DeployerProfile,
     Holder,
     HolderDistribution,
     OwnerType,
@@ -182,6 +183,10 @@ class RPCDataProvider(BaseDataProvider):
             deployer = self._safe(
                 lambda: trace_deployer(explorer, cfg, token, prior_rug_lookup=self._prior_rug_lookup), "deployer trace"
             )
+        if deployer is None:
+            # No explorer: the sender of the transaction that emitted the first Transfer (the mint) is the
+            # deployer. Funding origin and wallet age stay unknown, but prior-rug lookups work.
+            deployer = self._safe(lambda: self._deployer_from_mint(client, token, block_number), "deployer from mint")
 
         discovery = PoolDiscovery(client, cfg, self.registry, replay_lookback=self.replay_lookback)
         pools = (
@@ -288,6 +293,20 @@ class RPCDataProvider(BaseDataProvider):
     # ------------------------------------------------------------------ #
     # pieces
     # ------------------------------------------------------------------ #
+    def _deployer_from_mint(self, client: EvmClient, token: str, head: int) -> DeployerProfile | None:
+        from_block = max(0, head - self.replay_lookback) if self.replay_lookback else 0
+        entries, _ = client.get_logs_window(
+            token, [TRANSFER_TOPIC, topic_address(ZERO_ADDRESS)], from_block, head, chunk=50_000, max_chunks=40
+        )
+        if not entries:
+            return None
+        first = min(entries, key=lambda e: (e.block_number, e.log_index))
+        tx = client.get_transaction(first.tx_hash)
+        if tx is None:
+            return None
+        prior, linked = self._prior_rug_lookup(tx.sender) if self._prior_rug_lookup else (None, [])
+        return DeployerProfile(address=tx.sender, prior_rug_count=prior, linked_scam_addresses=linked)
+
     @staticmethod
     def _is_token0(client: EvmClient, pair: str, token: str) -> bool:
         raw = client.try_call(abi.v2_token0(pair))

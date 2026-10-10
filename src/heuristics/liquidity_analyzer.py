@@ -16,6 +16,7 @@ from src.heuristics.base import BaseHeuristic, ge, gt, lt
 from src.models.risk_report import (
     HeuristicResult,
     LiquidityPool,
+    LockerKind,
     RiskCategory,
     RiskFlag,
     Severity,
@@ -62,8 +63,12 @@ class LiquidityAnalyzer(BaseHeuristic):
             notes.append(f"{pool.dex} LP holder distribution unavailable – lock status unknown")
             return flags
 
-        unlocked = 1.0 - pool.locked_share
-        lockers = sorted({h.locker.value for h in pool.lp_holdings if h.locker})
+        unknown = pool.unknown_contract_share
+        unlocked = max(0.0, 1.0 - pool.locked_share - unknown)  # in wallets: can be pulled at any time
+        lockers = sorted(
+            {h.locker.value for h in pool.lp_holdings if h.locker and h.locker != LockerKind.UNKNOWN_CONTRACT}
+        )
+        unknown_holders = [h.holder for h in pool.lp_holdings if h.locker == LockerKind.UNKNOWN_CONTRACT]
         if gt(unlocked, self.t.lp_mostly_unlocked_ratio):
             flags.append(
                 self._flag(
@@ -88,8 +93,23 @@ class LiquidityAnalyzer(BaseHeuristic):
                     lockers=lockers,
                 )
             )
+        elif gt(unknown, self.t.lp_mostly_unlocked_ratio):
+            flags.append(
+                self._flag(
+                    "LP_HELD_BY_UNKNOWN_CONTRACT",
+                    Severity.MEDIUM,
+                    f"LP held by an unrecognised contract ({unknown:.0%})",
+                    f"{unknown:.0%} of {pool.dex} LP sits in {', '.join(unknown_holders[:2])} – not a known locker; "
+                    "a launchpad or factory that can withdraw it is as good as unlocked",
+                    dex=pool.dex,
+                    unknown_contract_share=unknown,
+                    holders=unknown_holders[:5],
+                )
+            )
         else:
-            notes.append(f"{pool.locked_share:.0%} of {pool.dex} LP locked/burned via {', '.join(lockers)}")
+            notes.append(f"{pool.locked_share:.0%} of {pool.dex} LP locked/burned via {', '.join(lockers) or 'n/a'}")
+            if unknown > 0:
+                notes.append(f"{unknown:.0%} of LP in unrecognised contract(s) {', '.join(unknown_holders[:2])}")
 
         if gt(pool.insider_share, self.t.lp_insider_ratio):
             flags.append(

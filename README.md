@@ -30,6 +30,8 @@ python main.py discover -c base --follow --min-tier HIGH --cache reports/rugscan
 
 The live provider needs a node that supports **state overrides** on `eth_call` (geth, erigon, reth, Alchemy, Infura, QuickNode…) for the sell simulation; everything else works on any JSON-RPC endpoint. Reads are batched through **Multicall3** (one round-trip per ~200 calls) when the chain has it, with a sequential fallback. `--at-block` needs an archive node.
 
+**What key-less public endpoints actually give you** (measured, not assumed): `publicnode.com` honours state overrides and Multicall3 but serves `eth_getLogs` only for roughly the **last 10k blocks** (~2 h on BSC) and spans ≤ 5k; `bsc-dataseed.*` serves no logs at all; `drpc.org` caps spans at ~100 blocks. The client learns a node's span and depth limits on the fly, splits or skips accordingly, and every log-derived fact is verified (holder replays must reconcile with `totalSupply`) or reported with its real window (swap analytics state the first served block). In practice this means new listings from `discover` get full holder, LP-lock and trade-flow analysis on a public node, while older tokens report those as unavailable rather than wrong — use a paid endpoint or an archive node for history. Without an Etherscan key, the deployer is still derived from the mint transaction, but funding origin, wallet age and source verification stay unknown.
+
 ## What it does
 
 ```

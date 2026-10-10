@@ -277,6 +277,29 @@ def test_lp_lock_expiring_soon(config, benign):
     assert "LP_LOCK_EXPIRING" in codes(result)
 
 
+def test_lp_in_unknown_contract_is_not_locked(config, benign):
+    from src.models.risk_report import LockerKind
+
+    benign.pools[0].lp_holdings = [
+        LPHolding(holder=A, share=0.95, locker=LockerKind.UNKNOWN_CONTRACT),
+        LPHolding(holder=B, share=0.05),
+    ]
+    pool = benign.pools[0]
+    assert pool.locked_share == 0.0 and pool.unknown_contract_share == pytest.approx(0.95)
+    result = LiquidityAnalyzer(config).evaluate(benign)
+    codes_ = codes(result)
+    assert "LP_HELD_BY_UNKNOWN_CONTRACT" in codes_ and "LP_MOSTLY_UNLOCKED" not in codes_
+    flag = next(f for f in result.flags if f.code == "LP_HELD_BY_UNKNOWN_CONTRACT")
+    assert flag.evidence["holders"] == [A]
+
+    # mostly in a wallet → the stronger flag wins even if some sits in an unknown contract
+    benign.pools[0].lp_holdings = [
+        LPHolding(holder=A, share=0.3, locker=LockerKind.UNKNOWN_CONTRACT),
+        LPHolding(holder=B, share=0.7),
+    ]
+    assert "LP_MOSTLY_UNLOCKED" in codes(LiquidityAnalyzer(config).evaluate(benign))
+
+
 def test_partially_unlocked_and_extreme_fdv(config, benign):
     benign.pools[0].lp_holdings = [LPHolding(holder=A, share=0.7, locker="uncx"), LPHolding(holder=B, share=0.3)]
     benign.pools[0].liquidity_usd = 1_000.0
