@@ -20,9 +20,7 @@ DEFAULT_FIXTURES_DIR = PROJECT_ROOT / "tests" / "fixtures"
 class Settings(BaseSettings):
     """Secrets and endpoints, read from ``RUGSCAN_*`` env vars or a ``.env`` file."""
 
-    model_config = SettingsConfigDict(
-        env_prefix="RUGSCAN_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
-    )
+    model_config = SettingsConfigDict(env_prefix="RUGSCAN_", env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # RPC URLs frequently embed provider API keys, so they are secrets too.
     ethereum_rpc_url: SecretStr | None = None
@@ -33,6 +31,7 @@ class Settings(BaseSettings):
 
     risk_weights_path: Path = DEFAULT_WEIGHTS_PATH
     fixtures_dir: Path = DEFAULT_FIXTURES_DIR
+    cache_path: Path | None = Field(None, description="SQLite snapshot/report cache; None disables caching")
     log_level: str = "INFO"
     rpc_timeout_s: float = Field(20.0, gt=0)
 
@@ -49,6 +48,7 @@ def get_settings() -> Settings:
 # --------------------------------------------------------------------------- #
 # risk_weights.yaml schema
 # --------------------------------------------------------------------------- #
+
 
 class _Cfg(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)

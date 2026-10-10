@@ -43,7 +43,13 @@ ERC20_ABI: list[dict[str, Any]] = [
     {"name": "name", "type": "function", "stateMutability": "view", "inputs": [], "outputs": [{"type": "string"}]},
     {"name": "symbol", "type": "function", "stateMutability": "view", "inputs": [], "outputs": [{"type": "string"}]},
     {"name": "decimals", "type": "function", "stateMutability": "view", "inputs": [], "outputs": [{"type": "uint8"}]},
-    {"name": "totalSupply", "type": "function", "stateMutability": "view", "inputs": [], "outputs": [{"type": "uint256"}]},
+    {
+        "name": "totalSupply",
+        "type": "function",
+        "stateMutability": "view",
+        "inputs": [],
+        "outputs": [{"type": "uint256"}],
+    },
     {"name": "owner", "type": "function", "stateMutability": "view", "inputs": [], "outputs": [{"type": "address"}]},
 ]
 
@@ -98,7 +104,7 @@ class RPCDataProvider(BaseDataProvider):
         for fn in ("name", "symbol", "decimals", "totalSupply", "owner"):
             try:
                 meta[fn] = contract.functions[fn]().call()
-            except Exception as exc:  # noqa: BLE001 - any revert just means "not exposed"
+            except Exception as exc:
                 log.debug("%s.%s() unavailable: %s", token, fn, exc)
                 meta[fn] = None
 

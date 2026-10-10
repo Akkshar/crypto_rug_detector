@@ -47,6 +47,34 @@ def test_analyze_rpc_without_url_exits_2(monkeypatch):
     assert result.exit_code == 2 and "RUGSCAN_BASE_RPC_URL" in result.output
 
 
+def test_analyze_with_cache_records_history_and_diff(tmp_path: Path):
+    db = tmp_path / "cache.db"
+    first = runner.invoke(app, ["analyze", "sample_benign_token", "-q", "--cache", str(db)])
+    assert first.exit_code == 0, first.output
+    assert "vs previous scan" not in first.output
+
+    second = runner.invoke(app, ["analyze", "sample_benign_token", "-q", "--cache", str(db), "--max-age", "999999"])
+    assert second.exit_code == 0, second.output
+    assert "served from cache" in second.output
+    assert "vs previous scan" in second.output and "(+0.0)" in second.output
+
+    hist = runner.invoke(
+        app, ["history", "0x1111111111111111111111111111111111111111", "-c", "ethereum", "--cache", str(db)]
+    )
+    assert hist.exit_code == 0, hist.output
+    assert "Scan history" in hist.stdout and hist.stdout.count("LOW") >= 2
+
+
+def test_history_without_cache_or_data(tmp_path: Path, monkeypatch):
+    from config.settings import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.delenv("RUGSCAN_CACHE_PATH", raising=False)
+    assert runner.invoke(app, ["history", "0x" + "11" * 20]).exit_code == 2
+    empty = runner.invoke(app, ["history", "0x" + "11" * 20, "--cache", str(tmp_path / "empty.db")])
+    assert empty.exit_code == 1 and "no cached reports" in empty.output
+
+
 def test_list_fixtures_and_weights():
     assert "sample_honeypot" in runner.invoke(app, ["list-fixtures"]).stdout
     weights = runner.invoke(app, ["weights"])

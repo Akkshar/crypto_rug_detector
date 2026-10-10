@@ -18,11 +18,11 @@ def build_heuristics(config: RiskConfig) -> list[BaseHeuristic]:
 
 
 __all__ = [
+    "DEFAULT_HEURISTICS",
     "BaseHeuristic",
     "ContractInspector",
     "DeployerTracer",
     "HolderMetrics",
     "LiquidityAnalyzer",
-    "DEFAULT_HEURISTICS",
     "build_heuristics",
 ]

@@ -28,6 +28,6 @@ class BaseDataProvider(ABC):
     async def fetch_snapshot(self, chain: Chain, address: str) -> TokenSnapshot:
         """Return a validated snapshot or raise :class:`SnapshotNotFound`."""
 
-    async def supports(self, chain: Chain) -> bool:  # noqa: D401 - simple predicate
+    async def supports(self, chain: Chain) -> bool:
         """Whether this provider can serve the given chain. Defaults to True."""
         return True

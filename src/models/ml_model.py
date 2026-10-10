@@ -71,7 +71,7 @@ def extract_features(snapshot: TokenSnapshot, config: RiskConfig) -> FeatureVect
 
     pool = snapshot.primary_pool
     if pool is None:
-        values["is_lp_locked"] = 0.0          # no pool at all is a real observation, not missing data
+        values["is_lp_locked"] = 0.0  # no pool at all is a real observation, not missing data
     elif pool.lp_holdings:
         values["is_lp_locked"] = float(pool.locked_share >= config.thresholds.lp_locked_ok_ratio)
     else:
@@ -82,11 +82,12 @@ def extract_features(snapshot: TokenSnapshot, config: RiskConfig) -> FeatureVect
     if snapshot.sell_simulation and snapshot.sell_simulation.effective_sell_tax_pct is not None:
         taxes.append(snapshot.sell_simulation.effective_sell_tax_pct)
     if snapshot.sell_simulation and snapshot.sell_simulation.attempted and snapshot.sell_simulation.succeeded == 0:
-        taxes.append(100.0)                   # a blocked sell is a 100% effective tax
+        taxes.append(100.0)  # a blocked sell is a 100% effective tax
     put("max_tax_rate", max(taxes) if taxes else None)
 
-    values["has_mint_function"] = float(bool(c.mint_functions) and not c.ownership_renounced
-                                        or any(f.hidden for f in c.mint_functions))
+    values["has_mint_function"] = float(
+        (bool(c.mint_functions) and not c.ownership_renounced) or any(f.hidden for f in c.mint_functions)
+    )
 
     put("deployer_age_days", snapshot.deployer.age_days(snapshot.observed_at) if snapshot.deployer else None)
     values["tvl_usd"] = snapshot.total_liquidity_usd if snapshot.pools else 0.0
@@ -97,6 +98,7 @@ def extract_features(snapshot: TokenSnapshot, config: RiskConfig) -> FeatureVect
 # --------------------------------------------------------------------------- #
 # Synthetic training population
 # --------------------------------------------------------------------------- #
+
 
 def _transform(x: np.ndarray) -> np.ndarray:
     """Compress heavy-tailed columns so IsolationForest isn't dominated by TVL."""
@@ -117,22 +119,26 @@ def generate_synthetic_dataset(n_samples: int, seed: int) -> tuple[np.ndarray, n
     n_rug = int(n_samples * 0.4)
     n_ok = n_samples - n_rug
 
-    benign = np.column_stack([
-        rng.beta(2.0, 4.0, n_ok),                                # top10 ~0.33
-        (rng.random(n_ok) < 0.75).astype(float),                 # lp locked
-        np.clip(rng.gamma(1.5, 3.0, n_ok), 0, 100),              # taxes ~4.5%
-        (rng.random(n_ok) < 0.20).astype(float),                 # mint
-        rng.lognormal(4.3, 1.6, n_ok),                           # age ~75d, wide
-        rng.lognormal(11.0, 1.6, n_ok),                          # tvl ~$60k
-    ])
-    rug = np.column_stack([
-        rng.beta(4.0, 2.5, n_rug),                               # top10 ~0.62
-        (rng.random(n_rug) < 0.35).astype(float),
-        np.clip(rng.gamma(1.8, 10.0, n_rug), 0, 100),            # taxes ~18%, long tail
-        (rng.random(n_rug) < 0.50).astype(float),
-        rng.lognormal(2.6, 1.6, n_rug),                          # age ~13d, wide
-        rng.lognormal(9.6, 1.6, n_rug),                          # tvl ~$15k
-    ])
+    benign = np.column_stack(
+        [
+            rng.beta(2.0, 4.0, n_ok),  # top10 ~0.33
+            (rng.random(n_ok) < 0.75).astype(float),  # lp locked
+            np.clip(rng.gamma(1.5, 3.0, n_ok), 0, 100),  # taxes ~4.5%
+            (rng.random(n_ok) < 0.20).astype(float),  # mint
+            rng.lognormal(4.3, 1.6, n_ok),  # age ~75d, wide
+            rng.lognormal(11.0, 1.6, n_ok),  # tvl ~$60k
+        ]
+    )
+    rug = np.column_stack(
+        [
+            rng.beta(4.0, 2.5, n_rug),  # top10 ~0.62
+            (rng.random(n_rug) < 0.35).astype(float),
+            np.clip(rng.gamma(1.8, 10.0, n_rug), 0, 100),  # taxes ~18%, long tail
+            (rng.random(n_rug) < 0.50).astype(float),
+            rng.lognormal(2.6, 1.6, n_rug),  # age ~13d, wide
+            rng.lognormal(9.6, 1.6, n_rug),  # tvl ~$15k
+        ]
+    )
     X = np.vstack([benign, rug])
     y = np.concatenate([np.zeros(n_ok), np.ones(n_rug)])
     order = rng.permutation(len(y))
@@ -142,6 +148,7 @@ def generate_synthetic_dataset(n_samples: int, seed: int) -> tuple[np.ndarray, n
 # --------------------------------------------------------------------------- #
 # Model
 # --------------------------------------------------------------------------- #
+
 
 @dataclass(frozen=True)
 class MLPrediction:
@@ -160,9 +167,7 @@ class RugRiskModel:
         self.classifier = GradientBoostingClassifier(
             n_estimators=150, max_depth=3, learning_rate=0.08, random_state=ml_config.seed
         ).fit(Xt, y)
-        self.detector = IsolationForest(
-            n_estimators=100, contamination="auto", random_state=ml_config.seed
-        ).fit(Xt)
+        self.detector = IsolationForest(n_estimators=100, contamination="auto", random_state=ml_config.seed).fit(Xt)
         scores = self.detector.decision_function(Xt)
         # Anything more anomalous than (1 - ood_percentile) of the training set is "novel".
         self.ood_threshold = float(np.quantile(scores, 1.0 - ml_config.ood_percentile))
@@ -179,7 +184,7 @@ class RugRiskModel:
         )
 
     def feature_importances(self) -> dict[str, float]:
-        return dict(zip(FEATURE_NAMES, map(float, self.classifier.feature_importances_)))
+        return dict(zip(FEATURE_NAMES, map(float, self.classifier.feature_importances_), strict=True))
 
 
 @lru_cache(maxsize=4)

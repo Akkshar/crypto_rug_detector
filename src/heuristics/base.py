@@ -58,7 +58,8 @@ class BaseHeuristic(ABC):
         detail: str,
         *,
         category: RiskCategory | None = None,
-        **evidence: object,
+        evidence: dict[str, object] | None = None,
+        **extra: object,
     ) -> RiskFlag:
         return RiskFlag(
             code=code,
@@ -67,7 +68,7 @@ class BaseHeuristic(ABC):
             title=title,
             detail=detail,
             points=self.config.points(code),
-            evidence=evidence,
+            evidence={**(evidence or {}), **extra},
         )
 
     def _result(

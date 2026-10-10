@@ -79,11 +79,11 @@ class Severity(StrEnum):
 
 
 class OwnerType(StrEnum):
-    RENOUNCED = "renounced"        # owner is 0x0 / dead
-    EOA = "eoa"                    # externally owned account
-    MULTISIG = "multisig"          # Safe-style contract wallet
-    TIMELOCK = "timelock"          # governance timelock contract
-    CONTRACT = "contract"          # some other contract, not a known timelock
+    RENOUNCED = "renounced"  # owner is 0x0 / dead
+    EOA = "eoa"  # externally owned account
+    MULTISIG = "multisig"  # Safe-style contract wallet
+    TIMELOCK = "timelock"  # governance timelock contract
+    CONTRACT = "contract"  # some other contract, not a known timelock
     UNKNOWN = "unknown"
 
 
@@ -92,7 +92,7 @@ class ProxyKind(StrEnum):
     TRANSPARENT = "transparent"
     UUPS = "uups"
     BEACON = "beacon"
-    MINIMAL = "minimal"            # EIP-1167 clone (not upgradeable)
+    MINIMAL = "minimal"  # EIP-1167 clone (not upgradeable)
     UNKNOWN = "unknown"
 
 
@@ -100,13 +100,13 @@ class LockerKind(StrEnum):
     UNCX = "uncx"
     PINKLOCK = "pinklock"
     TEAM_FINANCE = "team_finance"
-    BURNED = "burned"              # LP sent to 0x0 / dead
+    BURNED = "burned"  # LP sent to 0x0 / dead
     OTHER_KNOWN = "other_known"
     UNKNOWN_CONTRACT = "unknown_contract"
 
 
 class FundingSourceKind(StrEnum):
-    MIXER = "mixer"                        # Tornado Cash, Railgun, ...
+    MIXER = "mixer"  # Tornado Cash, Railgun, ...
     PRIVACY_EXCHANGE = "privacy_exchange"  # FixedFloat, eXch, ...
     CEX = "cex"
     BRIDGE = "bridge"
@@ -143,9 +143,7 @@ class FunctionSignature(_Strict):
     upper_bound_pct: Pct | None = Field(
         None, description="Hard cap enforced by the setter (fees/limits); None = unbounded"
     )
-    hidden: bool = Field(
-        False, description="Not exposed in the verified ABI but present in bytecode / internal calls"
-    )
+    hidden: bool = Field(False, description="Not exposed in the verified ABI but present in bytecode / internal calls")
 
 
 class ContractMetadata(_Strict):

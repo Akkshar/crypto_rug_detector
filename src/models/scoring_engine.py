@@ -56,7 +56,9 @@ class ScoringEngine:
         results: list[HeuristicResult] = []
         for heuristic in self.heuristics:
             result = heuristic.evaluate(snapshot)
-            log.info("[bold]── %s[/bold] (%d flag(s), %g raw pts)", result.heuristic, len(result.flags), result.raw_points)
+            log.info(
+                "[bold]── %s[/bold] (%d flag(s), %g raw pts)", result.heuristic, len(result.flags), result.raw_points
+            )
             for flag in result.flags:
                 log_flag(log, flag.severity.value, flag.title, flag.points)
             for note in result.notes:
@@ -84,9 +86,15 @@ class ScoringEngine:
             if raw[category] > cap:
                 log.info("[dim]cap[/dim] %s: %g raw → %g (cap %g)", category.value, raw[category], capped, cap)
             total += capped
-            breakdown.append(CategoryBreakdown(
-                category=category, raw_points=raw[category], capped_points=capped, cap=cap, flag_count=counts[category]
-            ))
+            breakdown.append(
+                CategoryBreakdown(
+                    category=category,
+                    raw_points=raw[category],
+                    capped_points=capped,
+                    cap=cap,
+                    flag_count=counts[category],
+                )
+            )
         rule_score = min(100.0, total)
         log.info("[bold]Rule-based score: %.1f[/bold] (sum of capped categories = %g)", rule_score, total)
         return rule_score, breakdown, flags
@@ -108,10 +116,16 @@ class ScoringEngine:
         )
         log.info(
             "[bold]ML refinement:[/bold] rug_probability=%.2f anomaly=%.3f ood=%s imputed=%s",
-            pred.rug_probability, pred.anomaly_score, pred.is_out_of_distribution, list(fv.imputed) or "none",
+            pred.rug_probability,
+            pred.anomaly_score,
+            pred.is_out_of_distribution,
+            list(fv.imputed) or "none",
         )
         if not reliable:
-            log.warning("[yellow]ML output marked unreliable – weight reduced ×%g[/yellow]", self.config.scoring.unreliable_ml_factor)
+            log.warning(
+                "[yellow]ML output marked unreliable – weight reduced ×%g[/yellow]",
+                self.config.scoring.unreliable_ml_factor,
+            )
         return assessment
 
     def combine(self, rule_score: float, ml: MLAssessment | None, hard_fail: bool) -> tuple[float, RiskTier]:
@@ -121,7 +135,14 @@ class ScoringEngine:
         else:
             w_ml = s.ml_weight * (1.0 if ml.reliable else s.unreliable_ml_factor)
             final = (1.0 - w_ml) * rule_score + w_ml * ml.rug_probability * 100.0
-            log.info("Blend: %.2f×rule(%.1f) + %.2f×ml(%.1f) = %.1f", 1 - w_ml, rule_score, w_ml, ml.rug_probability * 100, final)
+            log.info(
+                "Blend: %.2f×rule(%.1f) + %.2f×ml(%.1f) = %.1f",
+                1 - w_ml,
+                rule_score,
+                w_ml,
+                ml.rug_probability * 100,
+                final,
+            )
         if hard_fail:
             floored = max(final, s.hard_fail_score_floor)
             if floored != final:

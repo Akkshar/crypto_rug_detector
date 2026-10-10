@@ -28,24 +28,32 @@ class HolderMetrics(BaseHeuristic):
         concentration = min(1.0, sum(h.share for h in top10) / circulating)
         flags: list[RiskFlag] = []
         notes: list[str] = []
-        evidence = {
+        evidence: dict[str, object] = {
             "top10_concentration": round(concentration, 4),
             "circulating_share": round(circulating, 4),
             "holder_count": dist.holder_count,
         }
 
         if ge(concentration, self.t.top10_high):
-            flags.append(self._flag(
-                "TOP10_CONCENTRATION_HIGH", Severity.HIGH, f"Top-10 wallets hold {concentration:.0%} of circulating supply",
-                f"Excluding DEX/burn, 10 wallets control {concentration:.0%} (≥ {self.t.top10_high:.0%}) – coordinated dump risk",
-                **evidence,
-            ))
+            flags.append(
+                self._flag(
+                    "TOP10_CONCENTRATION_HIGH",
+                    Severity.HIGH,
+                    f"Top-10 wallets hold {concentration:.0%} of circulating supply",
+                    f"Excluding DEX/burn, 10 wallets control {concentration:.0%} (≥ {self.t.top10_high:.0%}) – coordinated dump risk",
+                    evidence=evidence,
+                )
+            )
         elif ge(concentration, self.t.top10_elevated):
-            flags.append(self._flag(
-                "TOP10_CONCENTRATION_ELEVATED", Severity.MEDIUM, f"Top-10 wallets hold {concentration:.0%} of circulating supply",
-                f"Excluding DEX/burn, 10 wallets control {concentration:.0%} (≥ {self.t.top10_elevated:.0%})",
-                **evidence,
-            ))
+            flags.append(
+                self._flag(
+                    "TOP10_CONCENTRATION_ELEVATED",
+                    Severity.MEDIUM,
+                    f"Top-10 wallets hold {concentration:.0%} of circulating supply",
+                    f"Excluding DEX/burn, 10 wallets control {concentration:.0%} (≥ {self.t.top10_elevated:.0%})",
+                    evidence=evidence,
+                )
+            )
         else:
             notes.append(f"Top-10 concentration {concentration:.0%} of circulating supply – dispersed")
 
@@ -54,9 +62,15 @@ class HolderMetrics(BaseHeuristic):
             whale_share = min(1.0, whale.share / circulating)
             if ge(whale_share, self.t.single_whale):
                 label = f" ({whale.label})" if whale.label else ""
-                flags.append(self._flag(
-                    "SINGLE_WHALE_DOMINANT", Severity.MEDIUM, f"Single wallet holds {whale_share:.0%} of circulating supply",
-                    f"{whale.address}{label} alone controls {whale_share:.0%} of non-DEX supply",
-                    whale=whale.address, whale_share=round(whale_share, 4), label=whale.label,
-                ))
+                flags.append(
+                    self._flag(
+                        "SINGLE_WHALE_DOMINANT",
+                        Severity.MEDIUM,
+                        f"Single wallet holds {whale_share:.0%} of circulating supply",
+                        f"{whale.address}{label} alone controls {whale_share:.0%} of non-DEX supply",
+                        whale=whale.address,
+                        whale_share=round(whale_share, 4),
+                        label=whale.label,
+                    )
+                )
         return self._result(flags, notes=notes)

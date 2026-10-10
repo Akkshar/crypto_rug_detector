@@ -20,6 +20,7 @@ from tests.conftest import FIXTURE_NAMES
 # Config
 # --------------------------------------------------------------------------- #
 
+
 def test_config_loads_with_all_categories_capped(config):
     assert set(config.category_caps) == set(RiskCategory)
     assert config.scoring.rule_weight + config.scoring.ml_weight == pytest.approx(1.0)
@@ -48,6 +49,7 @@ def test_config_rejects_unknown_keys():
 # --------------------------------------------------------------------------- #
 # Feature extraction & ML
 # --------------------------------------------------------------------------- #
+
 
 def test_feature_extraction_benign(config, benign):
     fv = extract_features(benign, config)
@@ -90,10 +92,28 @@ def test_model_learns_but_is_not_trivially_separable(engine):
 
 
 def test_model_predictions_directional(engine):
-    clean = FeatureVector(values={"top10_concentration": 0.2, "is_lp_locked": 1, "max_tax_rate": 1,
-                                  "has_mint_function": 0, "deployer_age_days": 800, "tvl_usd": 900_000}, imputed=())
-    dirty = FeatureVector(values={"top10_concentration": 0.9, "is_lp_locked": 0, "max_tax_rate": 60,
-                                  "has_mint_function": 1, "deployer_age_days": 1, "tvl_usd": 3_000}, imputed=())
+    clean = FeatureVector(
+        values={
+            "top10_concentration": 0.2,
+            "is_lp_locked": 1,
+            "max_tax_rate": 1,
+            "has_mint_function": 0,
+            "deployer_age_days": 800,
+            "tvl_usd": 900_000,
+        },
+        imputed=(),
+    )
+    dirty = FeatureVector(
+        values={
+            "top10_concentration": 0.9,
+            "is_lp_locked": 0,
+            "max_tax_rate": 60,
+            "has_mint_function": 1,
+            "deployer_age_days": 1,
+            "tvl_usd": 3_000,
+        },
+        imputed=(),
+    )
     p_clean, p_dirty = engine.model.predict(clean), engine.model.predict(dirty)
     assert p_clean.rug_probability < 0.2 < 0.8 < p_dirty.rug_probability
     assert engine.model.predict(clean).rug_probability == p_clean.rug_probability  # deterministic
@@ -102,6 +122,7 @@ def test_model_predictions_directional(engine):
 # --------------------------------------------------------------------------- #
 # Aggregation & blending
 # --------------------------------------------------------------------------- #
+
 
 def test_tier_boundaries(engine):
     assert engine.tier_for(0) is RiskTier.LOW
@@ -145,6 +166,7 @@ def test_category_caps_enforced(engine, honeypot):
 # --------------------------------------------------------------------------- #
 # End-to-end verdicts
 # --------------------------------------------------------------------------- #
+
 
 def test_benign_token_is_low(engine, benign):
     report = engine.score(benign, provider="mock")

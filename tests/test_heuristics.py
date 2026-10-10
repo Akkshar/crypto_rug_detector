@@ -20,8 +20,8 @@ from src.models.risk_report import (
     FundingSourceKind,
     Holder,
     HolderDistribution,
-    LPHolding,
     LiquidityPool,
+    LPHolding,
     OwnerType,
     ProxyKind,
     RiskCategory,
@@ -42,6 +42,7 @@ def codes(result) -> set[str]:
 # --------------------------------------------------------------------------- #
 # Schemas & provider
 # --------------------------------------------------------------------------- #
+
 
 @pytest.mark.parametrize("name", FIXTURE_NAMES)
 def test_fixtures_validate_and_checksum(provider, name):
@@ -108,7 +109,10 @@ def test_snapshot_json_roundtrip_survives_computed_fields(provider, name):
 
 def test_pool_computed_shares():
     pool = LiquidityPool(
-        dex="uniswap_v2", pair_address=A, quote_token="WETH", liquidity_usd=1.0,
+        dex="uniswap_v2",
+        pair_address=A,
+        quote_token="WETH",
+        liquidity_usd=1.0,
         lp_holdings=[
             LPHolding(holder=A, share=0.6, locker="uncx"),
             LPHolding(holder=B, share=0.4, is_deployer_or_owner=True),
@@ -121,6 +125,7 @@ def test_pool_computed_shares():
 # --------------------------------------------------------------------------- #
 # Every heuristic on every fixture
 # --------------------------------------------------------------------------- #
+
 
 @pytest.mark.parametrize("name", FIXTURE_NAMES)
 @pytest.mark.parametrize("cls", DEFAULT_HEURISTICS)
@@ -136,6 +141,7 @@ def test_every_flag_has_a_weight_and_valid_shape(config, provider, cls, name):
 # ContractInspector
 # --------------------------------------------------------------------------- #
 
+
 def test_contract_inspector_benign_is_clean(config, benign):
     result = ContractInspector(config).evaluate(benign)
     assert result.flags == []
@@ -146,8 +152,13 @@ def test_contract_inspector_benign_is_clean(config, benign):
 def test_contract_inspector_honeypot(config, honeypot):
     result = ContractInspector(config).evaluate(honeypot)
     assert {
-        "OWNER_ACTIVE_EOA", "UNBOUNDED_FEE_SETTER", "UNBOUNDED_MAX_TX_SETTER",
-        "BLACKLIST_CAPABILITY", "PAUSE_TRADING_CAPABILITY", "WHITELIST_TRANSFER_GATE", "SELL_TAX_EXTREME",
+        "OWNER_ACTIVE_EOA",
+        "UNBOUNDED_FEE_SETTER",
+        "UNBOUNDED_MAX_TX_SETTER",
+        "BLACKLIST_CAPABILITY",
+        "PAUSE_TRADING_CAPABILITY",
+        "WHITELIST_TRANSFER_GATE",
+        "SELL_TAX_EXTREME",
     } <= codes(result)
     assert result.hard_fail and "99%" in result.hard_fail_reason
     tax = next(f for f in result.flags if f.code == "SELL_TAX_EXTREME")
@@ -165,7 +176,12 @@ def test_renounced_ownership_neutralises_owner_gated_setters(config, honeypot):
     honeypot.contract.owner_type = OwnerType.RENOUNCED
     honeypot.contract.ownership_renounced = True
     result = ContractInspector(config).evaluate(honeypot)
-    assert not codes(result) & {"OWNER_ACTIVE_EOA", "UNBOUNDED_FEE_SETTER", "BLACKLIST_CAPABILITY", "PAUSE_TRADING_CAPABILITY"}
+    assert not codes(result) & {
+        "OWNER_ACTIVE_EOA",
+        "UNBOUNDED_FEE_SETTER",
+        "BLACKLIST_CAPABILITY",
+        "PAUSE_TRADING_CAPABILITY",
+    }
     assert "SELL_TAX_EXTREME" in codes(result)  # the tax itself is still live
 
 
@@ -192,7 +208,9 @@ def test_unverified_proxy_without_timelock(config, benign):
     benign.contract.implementation = B
     benign.contract.implementation_verified = False
     benign.contract.upgrade_delay_hours = 0
-    assert {"PROXY_UNVERIFIED_IMPLEMENTATION", "PROXY_UPGRADE_NO_TIMELOCK"} <= codes(ContractInspector(config).evaluate(benign))
+    assert {"PROXY_UNVERIFIED_IMPLEMENTATION", "PROXY_UPGRADE_NO_TIMELOCK"} <= codes(
+        ContractInspector(config).evaluate(benign)
+    )
 
 
 def test_unverified_source_flagged(config, benign):
@@ -203,6 +221,7 @@ def test_unverified_source_flagged(config, benign):
 # --------------------------------------------------------------------------- #
 # LiquidityAnalyzer
 # --------------------------------------------------------------------------- #
+
 
 def test_liquidity_benign_is_clean(config, benign):
     result = LiquidityAnalyzer(config).evaluate(benign)
@@ -237,8 +256,9 @@ def test_missing_sell_simulation_is_info_flag(config, benign):
 
 
 def test_hidden_sell_tax_and_hard_fail_on_measured_loss(config, benign):
-    benign.sell_simulation = SellSimulation(attempted=5, succeeded=5, buy_gas=100_000, sell_gas=120_000,
-                                            effective_sell_tax_pct=40.0)
+    benign.sell_simulation = SellSimulation(
+        attempted=5, succeeded=5, buy_gas=100_000, sell_gas=120_000, effective_sell_tax_pct=40.0
+    )
     result = LiquidityAnalyzer(config).evaluate(benign)
     assert "HIDDEN_SELL_TAX" in codes(result) and not result.hard_fail
     benign.sell_simulation = SellSimulation(attempted=5, succeeded=5, effective_sell_tax_pct=95.0)
@@ -268,6 +288,7 @@ def test_partially_unlocked_and_extreme_fdv(config, benign):
 # HolderMetrics
 # --------------------------------------------------------------------------- #
 
+
 def test_holder_metrics_values(config, benign, honeypot, rug):
     h = HolderMetrics(config)
     assert codes(h.evaluate(benign)) == {"TOP10_CONCENTRATION_ELEVATED"}
@@ -281,9 +302,14 @@ def test_holder_metrics_values(config, benign, honeypot, rug):
 
 
 def test_holder_metrics_excludes_dex_and_burn(config):
-    snap = TokenSnapshot(chain="bsc", address=A, contract=ContractMetadata(), holders=HolderDistribution(
-        top_holders=[Holder(address=A, share=0.9, is_dex_or_burn=True), Holder(address=B, share=0.01)]
-    ))
+    snap = TokenSnapshot(
+        chain="bsc",
+        address=A,
+        contract=ContractMetadata(),
+        holders=HolderDistribution(
+            top_holders=[Holder(address=A, share=0.9, is_dex_or_burn=True), Holder(address=B, share=0.01)]
+        ),
+    )
     result = HolderMetrics(config).evaluate(snap)
     # the single non-DEX wallet holds 10 % of circulating supply → nothing elevated
     assert result.flags == [] and result.data_available
@@ -299,12 +325,16 @@ def test_holder_metrics_without_data(config, benign):
 # DeployerTracer
 # --------------------------------------------------------------------------- #
 
+
 def test_deployer_tracer(config, benign, honeypot, rug):
     d = DeployerTracer(config)
     assert d.evaluate(benign).flags == []
     assert codes(d.evaluate(honeypot)) == {"DEPLOYER_PRIVACY_EXCHANGE_FUNDED", "DEPLOYER_FRESH_WALLET"}
     assert codes(d.evaluate(rug)) == {
-        "DEPLOYER_MIXER_FUNDED", "DEPLOYER_PRIOR_RUGS", "DEPLOYER_SERIAL_LAUNCHER", "DEPLOYER_FRESH_WALLET"
+        "DEPLOYER_MIXER_FUNDED",
+        "DEPLOYER_PRIOR_RUGS",
+        "DEPLOYER_SERIAL_LAUNCHER",
+        "DEPLOYER_FRESH_WALLET",
     }
     mixer = next(f for f in d.evaluate(rug).flags if f.code == "DEPLOYER_MIXER_FUNDED")
     assert mixer.severity is Severity.CRITICAL and "Tornado" in mixer.detail
