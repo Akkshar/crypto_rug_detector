@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
 from eth_abi import decode, encode
 from eth_utils import to_checksum_address
 
@@ -121,6 +122,52 @@ def test_block_pinning_is_passed_to_every_read():
     assert pinned.block_number() == 1_000 and client.block_number() == 123
     assert pinned.block_timestamp() == datetime.fromtimestamp(1_700_001_000, tz=timezone.utc)
     assert client.block_timestamp(5) == datetime.fromtimestamp(1_700_000_005, tz=timezone.utc)
+
+
+class RangeLimitedEth(StubEth):
+    """Node that rejects eth_getLogs spans above `max_span` and rate-limits every 3rd call."""
+
+    def __init__(self, fake: FakeEvmClient, max_span: int, rate_limit_every: int = 0):
+        super().__init__(fake)
+        self.max_span = max_span
+        self.rate_limit_every = rate_limit_every
+        self.log_calls: list[tuple[int, int]] = []
+
+    def get_logs(self, params):
+        self.log_calls.append((params["fromBlock"], params["toBlock"]))
+        if self.rate_limit_every and len(self.log_calls) % self.rate_limit_every == 0:
+            raise RuntimeError("429 Client Error: Too Many Requests")
+        if params["toBlock"] - params["fromBlock"] + 1 > self.max_span:
+            raise ValueError({"code": -32005, "message": "limit exceeded"})
+        return [
+            {"address": TOKEN, "topics": [b"\x00" * 32], "data": b"", "blockNumber": b, "transactionHash": b"\x01" * 32}
+            for b in range(params["fromBlock"], params["toBlock"] + 1)
+            if b % 1000 == 0
+        ]
+
+
+def test_get_logs_adapts_to_node_range_limit_and_rate_limits():
+    eth = RangeLimitedEth(FakeEvmClient(), max_span=5_000, rate_limit_every=4)
+    client = Web3EvmClient(StubW3(eth), chain_id=1)
+    client.backoff_s = 0.0
+    entries = client.get_logs(TOKEN, [None], 0, 19_999)
+    assert [e.block_number for e in entries] == list(range(0, 20_000, 1000))  # nothing lost across splits/retries
+    assert client.log_span_hint is not None and client.log_span_hint <= 5_000
+    assert all(hi - lo + 1 <= 5_000 for lo, hi in eth.log_calls if hi - lo + 1 <= client.log_span_hint)
+    before = len(eth.log_calls)
+    client.get_logs(TOKEN, [None], 20_000, 29_999)  # the learned span is used proactively – no new rejections
+    new_calls = eth.log_calls[before:]
+    assert all(hi - lo + 1 <= client.log_span_hint for lo, hi in new_calls)
+
+
+def test_non_range_errors_propagate():
+    class Broken(StubEth):
+        def get_logs(self, params):
+            raise RuntimeError("invalid argument 0: json: cannot unmarshal")
+
+    client = Web3EvmClient(StubW3(Broken(FakeEvmClient())), chain_id=1)
+    with pytest.raises(RuntimeError, match="unmarshal"):
+        client.get_logs(TOKEN, [None], 0, 10)
 
 
 def test_fake_client_block_pinning_clamps_logs():

@@ -41,12 +41,16 @@ class PoolDiscovery:
         *,
         log_chunk: int = 50_000,
         max_log_chunks: int = 40,
+        replay_lookback: int | None = None,
     ):
         self.client = client
         self.cfg = chain_cfg
         self.registry = registry
         self.log_chunk = log_chunk
         self.max_log_chunks = max_log_chunks
+        #: Replay Transfer logs only this many blocks back (None = from genesis). Replays whose
+        #: positive balances don't add up to totalSupply are rejected rather than reported wrong.
+        self.replay_lookback = replay_lookback
         self._decimals: dict[str, int] = {}
 
     # ------------------------------------------------------------------ #
@@ -224,8 +228,14 @@ class PoolDiscovery:
         balances, first_block = self.replay_balances(pair)
         if not balances:
             return [], None, first_block
+        balances.pop(ZERO_ADDRESS, None)  # LP burned via Transfer→0x0 no longer exists (v2 burn path)
         total = sum(v for v in balances.values() if v > 0)
         if total <= 0:
+            return [], None, first_block
+        if not self.replay_matches_supply(pair, total):
+            log.warning(
+                "LP replay for %s does not reconcile with totalSupply – history exceeds the replay window", pair
+            )
             return [], None, first_block
         insiders = {to_checksum_address(a) for a in (deployer, owner) if a}
         holdings: list[LPHolding] = []
@@ -249,10 +259,28 @@ class PoolDiscovery:
             holdings[0] = holdings[0].model_copy(update={"share": max(0.0, holdings[0].share - excess)})
         return holdings[:25], None, first_block
 
-    def replay_balances(self, token: str, *, from_block: int = 0) -> tuple[dict[str, int], int | None]:
-        """Rebuild ERC-20 balances from ``Transfer`` logs. Returns (balances, first_block)."""
+    def replay_matches_supply(self, token: str, replayed_total: int, *, tolerance: float = 0.01) -> bool:
+        """True when the replayed positive balances reconcile with on-chain totalSupply (or supply is unreadable)."""
+        raw = self.client.try_call(abi.erc20_total_supply(token))
+        if raw is None:
+            return True  # cannot verify – accept
+        try:
+            supply = int(abi.erc20_total_supply(token).one(raw))
+        except Exception:  # noqa: BLE001
+            return True
+        if supply == 0:
+            return replayed_total == 0
+        return abs(replayed_total - supply) <= tolerance * supply
+
+    def replay_balances(self, token: str, *, from_block: int | None = None) -> tuple[dict[str, int], int | None]:
+        """Rebuild ERC-20 balances from ``Transfer`` logs. Returns (balances, first_block).
+
+        ``from_block`` defaults to ``head - replay_lookback`` (or genesis when no lookback is set).
+        """
         token = to_checksum_address(token)
         latest = self.client.block_number()
+        if from_block is None:
+            from_block = max(0, latest - self.replay_lookback) if self.replay_lookback else 0
         balances: dict[str, int] = {}
         first_block: int | None = None
         chunks = 0

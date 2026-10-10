@@ -93,6 +93,7 @@ def test_v2_discovery_with_lp_lock_classification(client):
         transfer_log(PAIR, DEPLOYER, DEAD, 30, block=12),
     ]
     client.with_code(UNCX)
+    client.returns(abi.erc20_total_supply(PAIR), 1000)  # replay must reconcile with totalSupply
 
     pools = PoolDiscovery(client, ETH, REG).discover(TOKEN, deployer=DEPLOYER, owner=None)
     assert len(pools) == 1
@@ -138,6 +139,29 @@ def test_replay_balances_and_unknown_contract_holder(client):
     holdings, _, created_block = d.lp_holdings_v2(PAIR, deployer=DEPLOYER, owner=None)
     assert created_block == 1
     assert {h.holder: h.locker for h in holdings} == {DEPLOYER: None, other_contract: LockerKind.UNKNOWN_CONTRACT}
+
+
+def test_replay_rejected_when_history_exceeds_window(client, caplog):
+    # Only part of the LP history is visible in the window: the replayed total (60) ≠ totalSupply (1000).
+    client.logs += [transfer_log(PAIR, ZERO_ADDRESS, DEPLOYER, 60, block=90)]
+    client.returns(abi.erc20_total_supply(PAIR), 1000)
+    d = PoolDiscovery(client, ETH, REG, replay_lookback=20)
+    with caplog.at_level("WARNING", logger="rugscan.pools"):
+        holdings, _, first = d.lp_holdings_v2(PAIR, deployer=DEPLOYER, owner=None)
+    assert holdings == [] and first == 90 and "does not reconcile" in caplog.text
+    # genesis replay (no lookback) of a consistent history passes
+    client.returns(abi.erc20_total_supply(PAIR), 60)
+    assert len(PoolDiscovery(client, ETH, REG).lp_holdings_v2(PAIR, deployer=DEPLOYER, owner=None)[0]) == 1
+
+
+def test_burned_to_zero_is_excluded_from_lp_total(client):
+    client.logs += [
+        transfer_log(PAIR, ZERO_ADDRESS, DEPLOYER, 100, block=1),
+        transfer_log(PAIR, DEPLOYER, ZERO_ADDRESS, 40, block=2),  # v2 burn path – supply shrinks to 60
+    ]
+    client.returns(abi.erc20_total_supply(PAIR), 60)
+    holdings, _, _ = PoolDiscovery(client, ETH, REG).lp_holdings_v2(PAIR, deployer=DEPLOYER, owner=None)
+    assert [(h.holder, h.share) for h in holdings] == [(DEPLOYER, 1.0)]
 
 
 def test_log_replay_truncation_is_logged_not_fatal(client, caplog):

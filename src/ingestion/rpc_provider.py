@@ -39,6 +39,7 @@ from src.ingestion.evm.simulate import SellSimulator
 from src.ingestion.evm.trades import analyse_swaps
 from src.models.risk_report import (
     BURN_ADDRESSES,
+    ZERO_ADDRESS,
     BytecodeMatch,
     Chain,
     ContractMetadata,
@@ -73,8 +74,12 @@ class RPCDataProvider(BaseDataProvider):
         similarity_lookup: SimilarityLookup | None = None,
         simulate_sells: bool = True,
         swap_window_blocks: int = 200_000,
+        replay_lookback: int | None = 200_000,
     ):
         self.swap_window_blocks = swap_window_blocks
+        # Transfer-log replay window for holders / LP. Replays that don't reconcile with totalSupply are
+        # rejected, so older tokens report holders as unavailable instead of wrong; new launches fit easily.
+        self.replay_lookback = replay_lookback
         self.settings = settings or get_settings()
         self.registry = registry or load_chain_registry()
         self._injected_client = client_factory is not None
@@ -171,7 +176,7 @@ class RPCDataProvider(BaseDataProvider):
                 lambda: trace_deployer(explorer, cfg, token, prior_rug_lookup=self._prior_rug_lookup), "deployer trace"
             )
 
-        discovery = PoolDiscovery(client, cfg, self.registry)
+        discovery = PoolDiscovery(client, cfg, self.registry, replay_lookback=self.replay_lookback)
         pools = (
             self._safe(
                 lambda: discovery.discover(
@@ -377,8 +382,14 @@ class RPCDataProvider(BaseDataProvider):
         balances, _ = discovery.replay_balances(token)
         if not balances:
             return HolderDistribution()
+        balances.pop(ZERO_ADDRESS, None)  # tokens transferred to 0x0 are gone; 0xdead ones still exist (burned)
         supply = sum(v for v in balances.values() if v > 0)
         if supply <= 0:
+            return HolderDistribution()
+        if not discovery.replay_matches_supply(token, supply):
+            log.warning(
+                "holder replay for %s does not reconcile with totalSupply – reporting holders as unavailable", token
+            )
             return HolderDistribution()
         pair_addrs = {p.pair_address: p.dex for p in pools}
         holders: list[Holder] = []
