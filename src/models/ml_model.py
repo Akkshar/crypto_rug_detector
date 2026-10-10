@@ -19,6 +19,7 @@ import logging
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from sklearn.ensemble import GradientBoostingClassifier, IsolationForest
@@ -165,14 +166,27 @@ class MLPrediction:
 class RugRiskModel:
     name = "gbm+isoforest/synthetic-v1"
 
-    def __init__(self, ml_config: MLConfig, dataset: tuple[np.ndarray, np.ndarray] | None = None):
+    def __init__(
+        self,
+        ml_config: MLConfig,
+        dataset: tuple[np.ndarray, np.ndarray] | None = None,
+        *,
+        calibrate: str | None = None,
+    ):
         self.cfg = ml_config
         X, y = dataset if dataset is not None else generate_synthetic_dataset(ml_config.n_samples, ml_config.seed)
         self.trained_on = "synthetic" if dataset is None else "labelled"
+        self.calibration = calibrate
         Xt = _transform(X)
-        self.classifier = GradientBoostingClassifier(
-            n_estimators=150, max_depth=3, learning_rate=0.08, random_state=ml_config.seed
-        ).fit(Xt, y)
+        gbm = GradientBoostingClassifier(n_estimators=150, max_depth=3, learning_rate=0.08, random_state=ml_config.seed)
+        if calibrate:
+            from sklearn.calibration import CalibratedClassifierCV
+
+            # Calibrated probabilities mean "0.8" ≈ 80 % of such tokens rugged; needs a few of each class per fold.
+            folds = max(2, min(5, int(min(y.sum(), (1 - y).sum()))))
+            self.classifier: Any = CalibratedClassifierCV(gbm, method=calibrate, cv=folds).fit(Xt, y)
+        else:
+            self.classifier = gbm.fit(Xt, y)
         self.detector = IsolationForest(n_estimators=100, contamination="auto", random_state=ml_config.seed).fit(Xt)
         scores = self.detector.decision_function(Xt)
         # Anything more anomalous than (1 - ood_percentile) of the training set is "novel".
@@ -207,8 +221,17 @@ class RugRiskModel:
             out[name] = round(base - float(self.classifier.predict_proba(x)[0, 1]), 4)
         return out
 
+    def predict_proba_matrix(self, X: np.ndarray) -> np.ndarray:
+        """P(rug) for a raw (untransformed) feature matrix – used by cross-validation."""
+        return self.classifier.predict_proba(_transform(np.asarray(X, dtype=float)))[:, 1]
+
     def feature_importances(self) -> dict[str, float]:
-        return dict(zip(FEATURE_NAMES, map(float, self.classifier.feature_importances_), strict=True))
+        clf = self.classifier
+        if hasattr(clf, "feature_importances_"):
+            importances = clf.feature_importances_
+        else:  # CalibratedClassifierCV – average the underlying boosters
+            importances = np.mean([c.estimator.feature_importances_ for c in clf.calibrated_classifiers_], axis=0)
+        return dict(zip(FEATURE_NAMES, map(float, importances), strict=True))
 
     # ------------------------------------------------------------------ #
     # persistence
@@ -243,14 +266,21 @@ def model_fingerprint(ml_config: MLConfig, trained_on: str = "synthetic") -> str
 
 @lru_cache(maxsize=4)
 def get_model(ml_config: MLConfig, cache_dir: Path | None = None) -> RugRiskModel:
-    """Load a persisted model for this configuration, or train once and persist it."""
+    """Load a persisted model for this configuration, or train once and persist it.
+
+    A model trained on labelled data (``rugscan train``) takes precedence over the
+    synthetic one when both exist for the same configuration.
+    """
     if cache_dir is not None:
-        path = Path(cache_dir) / f"{model_fingerprint(ml_config)}.joblib"
-        if path.exists():
-            try:
-                return RugRiskModel.load(path)
-            except Exception as exc:  # noqa: BLE001 - a stale/corrupt pickle must not break scoring
-                log.warning("ignoring unreadable model cache %s: %s", path, exc)
+        for trained_on in ("labelled", "synthetic"):
+            path = Path(cache_dir) / f"{model_fingerprint(ml_config, trained_on)}.joblib"
+            if path.exists():
+                try:
+                    model = RugRiskModel.load(path)
+                    log.info("loaded %s model from %s", trained_on, path.name)
+                    return model
+                except Exception as exc:  # noqa: BLE001 - a stale/corrupt pickle must not break scoring
+                    log.warning("ignoring unreadable model cache %s: %s", path, exc)
     model = RugRiskModel(ml_config)
     if cache_dir is not None:
         try:

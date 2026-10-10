@@ -280,6 +280,167 @@ def backtest(
         err.print(f"[dim]metrics written to {json_out}[/dim]")
 
 
+@app.command()
+def train(
+    cache: Annotated[Path | None, typer.Option(help="SQLite cache with labelled snapshots")] = None,
+    jsonl: Annotated[Path | None, typer.Option(help="JSONL export with labels")] = None,
+    weights: Annotated[Path | None, typer.Option(help="risk_weights.yaml (ML section)")] = None,
+    calibrate: Annotated[str, typer.Option(help="sigmoid | isotonic | none")] = "sigmoid",
+    folds: Annotated[int, typer.Option(help="Cross-validation folds")] = 5,
+    model_dir: Annotated[Path | None, typer.Option(help="Where to persist (default RUGSCAN_MODEL_CACHE_DIR)")] = None,
+    json_out: Annotated[Path | None, typer.Option("--json-out", "-o")] = None,
+) -> None:
+    """Train the ML layer on labelled snapshots (replaces the synthetic prior for this configuration)."""
+    import json
+
+    from src.backtest import load_labelled, train_model
+
+    _utf8_stdout()
+    configure_logging("WARNING", console=err)
+    store = _open_cache(cache)
+    try:
+        items = load_labelled(cache=store, jsonl=jsonl)
+    finally:
+        if store is not None:
+            store.close()
+    config = load_risk_config(weights)
+    target = model_dir or get_settings().model_cache_dir
+    try:
+        model, metrics = train_model(
+            items, config, calibrate=None if calibrate.lower() == "none" else calibrate, folds=folds, persist_dir=target
+        )
+    except ValueError as exc:
+        err.print(f"[bold red]error:[/bold red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    table = Table(title=f"Cross-validated on {metrics.n} snapshots ({metrics.n_rug} rugs), {metrics.folds} folds")
+    table.add_column("Metric")
+    table.add_column("Value", justify="right")
+    table.add_row("AUC", f"{metrics.auc_mean:.3f} ± {metrics.auc_std:.3f}" if metrics.auc_mean is not None else "n/a")
+    table.add_row("Accuracy @0.5", f"{metrics.accuracy:.3f}")
+    table.add_row("Brier score", f"{metrics.brier:.4f}  (0.25 = coin flip)")
+    table.add_row("Rows with imputed features", str(metrics.imputed_rows))
+    table.add_row("Calibration", model.calibration or "none")
+    table.add_row("Feature importances", "  ".join(f"{k} {v:.2f}" for k, v in model.feature_importances().items()))
+    out.print(table)
+    if target:
+        out.print(f"[dim]model persisted to {target} – `analyze` will now prefer it for this configuration[/dim]")
+    if json_out:
+        json_out.write_text(json.dumps(metrics.as_dict(), indent=2), encoding="utf-8")
+
+
+@app.command()
+def tune(
+    cache: Annotated[Path | None, typer.Option(help="SQLite cache with labelled snapshots")] = None,
+    jsonl: Annotated[Path | None, typer.Option(help="JSONL export with labels")] = None,
+    weights: Annotated[Path | None, typer.Option(help="Starting risk_weights.yaml")] = None,
+    positive_tier: Annotated[
+        RiskTier, typer.Option(help="Tier at/above which a token counts as flagged")
+    ] = RiskTier.HIGH,
+    max_fp_rate: Annotated[
+        float | None, typer.Option(help="Reject proposals whose false-positive rate exceeds this")
+    ] = None,
+    passes: Annotated[int, typer.Option(help="Coordinate-descent passes")] = 2,
+    output: Annotated[Path, typer.Option("--output", "-o", help="Where to write the proposed YAML")] = Path(
+        "risk_weights.tuned.yaml"
+    ),
+) -> None:
+    """Search flag weights that maximise F1 on the labelled corpus and write a proposed YAML."""
+    from config.settings import DEFAULT_WEIGHTS_PATH
+    from src.backtest import load_labelled, tune_weights, write_proposal
+
+    _utf8_stdout()
+    configure_logging("WARNING", console=err)
+    store = _open_cache(cache)
+    try:
+        items = load_labelled(cache=store, jsonl=jsonl)
+    finally:
+        if store is not None:
+            store.close()
+    if not items:
+        err.print("[bold red]error:[/bold red] no labelled snapshots found; use `label` or pass --jsonl")
+        raise typer.Exit(code=2)
+    config = load_risk_config(weights)
+    result = tune_weights(config, items, positive_tier=positive_tier, max_fp_rate=max_fp_rate, passes=passes)
+
+    table = Table(
+        title=f"Tuning on {len(items)} snapshots – F1 {result.baseline_objective:.3f} → {result.best_objective:.3f}"
+    )
+    table.add_column("Flag", style="bold")
+    table.add_column("Before", justify="right")
+    table.add_column("After", justify="right")
+    for code, (before, after) in result.changed.items():
+        table.add_row(code, f"{before:g}", f"{after:g}")
+    if not result.changed:
+        table.add_row("—", "", "no change improved the objective")
+    out.print(table)
+    path = write_proposal(result, weights or DEFAULT_WEIGHTS_PATH, output)
+    out.print(f"proposed weights written to {path}  (try: backtest --weights {path})")
+
+
+@app.command("import-corpus")
+def import_corpus(
+    csv_path: Annotated[Path, typer.Argument(help="CSV with columns chain,address,label[,block]")],
+    provider: Annotated[ProviderKind, typer.Option("--provider", "-p")] = ProviderKind.MOCK,
+    fixtures: Annotated[Path | None, typer.Option(help="Fixture directory for the mock provider")] = None,
+    cache: Annotated[Path | None, typer.Option(help="SQLite cache to fill (or RUGSCAN_CACHE_PATH)")] = None,
+    at_launch: Annotated[bool, typer.Option(help="Snapshot each token shortly after creation (live provider)")] = False,
+    launch_offset: Annotated[int, typer.Option(help="Blocks after creation when --at-launch")] = 1_000,
+    quiet: Annotated[bool, typer.Option("--quiet", "-q")] = True,
+) -> None:
+    """Fetch, label and cache every token in a CSV – the raw material for `backtest`, `train` and `tune`."""
+    import csv
+
+    from src.backtest.harness import parse_label
+    from src.ingestion.rpc_provider import RPCDataProvider
+
+    _utf8_stdout()
+    configure_logging("CRITICAL" if quiet else "INFO", console=err)
+    store = _open_cache(cache)
+    if store is None:
+        err.print("[bold red]error:[/bold red] no cache given; pass --cache or set RUGSCAN_CACHE_PATH")
+        raise typer.Exit(code=2)
+
+    ok = failed = 0
+    try:
+        with csv_path.open(encoding="utf-8", newline="") as fh:
+            for row in csv.DictReader(fh):
+                address = (row.get("address") or "").strip()
+                label = (row.get("label") or "").strip()
+                chain_name = (row.get("chain") or "ethereum").strip().lower()
+                if parse_label(label) is None:
+                    err.print(f"[yellow]skip[/yellow] {address}: unknown label {label!r}")
+                    failed += 1
+                    continue
+                try:
+                    chain = Chain(chain_name)
+                    data_provider, resolved_chain, target = _make_provider(
+                        provider, address, chain, fixtures, store, None
+                    )
+                    block = int(row["block"]) if row.get("block") else None
+                    if block is None and at_launch:
+                        inner = data_provider.inner if isinstance(data_provider, CachingProvider) else data_provider
+                        if isinstance(inner, RPCDataProvider):
+                            created = inner.creation_block(resolved_chain, target)
+                            block = created + launch_offset if created is not None else None
+                    snapshot = asyncio.run(data_provider.fetch_snapshot(resolved_chain, target, block=block))
+                    store.put_snapshot(snapshot, data_provider.name, label=label.lower())
+                    ok += 1
+                    err.print(
+                        f"[dim]{snapshot.address} on {resolved_chain.value} → {label}"
+                        + (f" @ block {block}" if block else "")
+                        + "[/dim]"
+                    )
+                except Exception as exc:  # noqa: BLE001 - keep importing the rest of the file
+                    err.print(f"[yellow]failed[/yellow] {address}: {exc}")
+                    failed += 1
+    finally:
+        store.close()
+    out.print(f"imported {ok} snapshot(s), {failed} failed")
+    if ok == 0:
+        raise typer.Exit(code=1)
+
+
 @app.command("export-snapshots")
 def export_snapshots(
     output: Annotated[Path, typer.Argument(help="Destination .jsonl")],

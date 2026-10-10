@@ -109,6 +109,35 @@ def test_watch_mock_runs_fixed_iterations(tmp_path: Path):
     assert runner.invoke(app, ["watch", "nope", "--iterations", "1"]).exit_code == 2
 
 
+def test_import_corpus_train_and_tune_cli(tmp_path: Path):
+    db = tmp_path / "corpus.db"
+    csv_file = tmp_path / "corpus.csv"
+    csv_file.write_text(
+        "chain,address,label\n"
+        "ethereum,0x1111111111111111111111111111111111111111,benign\n"
+        "bsc,0x2222222222222222222222222222222222222222,rug\n"
+        "base,0x3333333333333333333333333333333333333333,rug\n"
+        "base,0x3333333333333333333333333333333333333333,maybe\n"
+        "ethereum,0x9999999999999999999999999999999999999999,rug\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["import-corpus", str(csv_file), "--cache", str(db)])
+    assert result.exit_code == 0, result.output
+    assert "imported 3 snapshot(s), 2 failed" in result.stdout
+
+    too_few = runner.invoke(app, ["train", "--cache", str(db), "--model-dir", str(tmp_path / "models")])
+    assert too_few.exit_code == 2 and "at least 30" in too_few.output
+
+    tuned = tmp_path / "tuned.yaml"
+    result = runner.invoke(app, ["tune", "--cache", str(db), "-o", str(tuned), "--passes", "1"])
+    assert result.exit_code == 0, result.output
+    assert tuned.exists() and "proposed weights written" in result.stdout
+    assert runner.invoke(app, ["backtest", "--cache", str(db), "--weights", str(tuned)]).exit_code == 0
+
+    assert runner.invoke(app, ["import-corpus", str(csv_file)]).exit_code == 2  # no cache
+    assert runner.invoke(app, ["tune", "--cache", str(tmp_path / "empty.db")]).exit_code == 2
+
+
 def test_at_block_is_accepted_by_mock_provider():
     result = runner.invoke(app, ["analyze", "sample_benign_token", "--json", "-q", "--at-block", "123"])
     assert result.exit_code == 0, result.output

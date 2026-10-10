@@ -117,6 +117,18 @@ class RPCDataProvider(BaseDataProvider):
     async def supports(self, chain: Chain) -> bool:
         return self._injected_client or self.settings.rpc_url(chain) is not None
 
+    def creation_block(self, chain: Chain, address: str) -> int | None:
+        """Block the token contract was created in (needs the explorer for the creation tx)."""
+        chain = Chain(chain)
+        explorer = self._explorer_factory(chain)
+        if explorer is None:
+            return None
+        creation = explorer.get_contract_creation(to_checksum_address(address))
+        if creation is None:
+            return None
+        tx = self._client(chain).get_transaction(creation[1])
+        return tx.block_number if tx else None
+
     # ------------------------------------------------------------------ #
     async def fetch_snapshot(self, chain: Chain, address: str, *, block: int | None = None) -> TokenSnapshot:
         return await asyncio.to_thread(self.fetch_sync, chain, address, block)
