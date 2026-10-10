@@ -98,6 +98,8 @@ class EvmClient(Protocol):
         """Chunked fetch that skips ranges the node refuses; returns (entries, first block actually served)."""
         ...
 
+    def find_log_horizon(self, address: str, topics: list[bytes | None], lo: int, hi: int) -> int | None: ...
+
     def get_transaction(self, tx_hash: str) -> TxInfo | None: ...
 
     def estimate_gas(
@@ -215,6 +217,40 @@ class Web3EvmClient:
                 log.warning("multicall batch failed (%s); retrying sequentially", exc)
                 out.extend(self.try_call(c) for c in chunk)
         return out
+
+    def find_log_horizon(self, address: str, topics: list[bytes | None], lo: int, hi: int) -> int | None:
+        """Earliest block in [lo, hi] the node serves logs from, by bisection with minimum-span probes.
+
+        ~log2(range) probes instead of crawling one span at a time. Returns None when even the most recent
+        probe is refused (the node serves nothing in this range) and records the result in min_served_block.
+        """
+        if self.min_served_block is not None and lo >= self.min_served_block:
+            return lo
+        span = self.LOG_MIN_SPAN
+
+        def served(start: int) -> bool:
+            try:
+                self._fetch_logs(address, topics, start, min(hi, start + span - 1))
+                return True
+            except Exception as exc:
+                if is_range_limit(exc):
+                    return False
+                raise
+
+        right = max(lo, hi - span + 1)
+        if not served(right):
+            self.min_served_block = max(self.min_served_block or 0, hi + 1)
+            return None
+        left = lo  # invariant: `right` is served; `left` is refused (or the range start)
+        while right - left > span:
+            mid = (left + right) // 2
+            if served(mid):
+                right = mid
+            else:
+                left = mid
+        self.min_served_block = right if self.min_served_block is None else max(self.min_served_block, right)
+        log.info("node log horizon for %s located at block %d", address, right)
+        return right
 
     def get_code(self, address: str) -> bytes:
         return bytes(
@@ -464,6 +500,11 @@ class FakeEvmClient:
     ) -> tuple[list[LogEntry], int | None]:
         return _window(self, address, topics, from_block, to_block, chunk=chunk, max_chunks=max_chunks)
 
+    def find_log_horizon(self, address: str, topics: list[bytes | None], lo: int, hi: int) -> int | None:
+        if self.min_served_block is None or lo >= self.min_served_block:
+            return lo
+        return self.min_served_block if self.min_served_block <= hi else None
+
     def get_transaction(self, tx_hash: str) -> TxInfo | None:
         return self.transactions.get(tx_hash)
 
@@ -538,8 +579,18 @@ def _window(
         try:
             got = client.get_logs(address, topics, lo, hi)
         except LogRangeUnavailable:
-            skipped += 1
-            continue
+            # The chunk may straddle the node's history horizon. Locate the horizon by bisection (a handful
+            # of small probes) and fetch just the served tail instead of losing the whole chunk.
+            horizon = client.find_log_horizon(address, topics, lo, hi)
+            if horizon is None or horizon > hi:
+                skipped += 1
+                continue
+            try:
+                got = client.get_logs(address, topics, horizon, hi)
+                lo = horizon
+            except LogRangeUnavailable:
+                skipped += 1
+                continue
         if first_served is None:
             first_served = lo
         entries.extend(got)

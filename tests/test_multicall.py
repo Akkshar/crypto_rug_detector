@@ -204,6 +204,38 @@ def test_depth_limited_node_is_learned_and_window_skips_refused_history():
     assert len(eth.calls) == calls_before
 
 
+def test_window_recovers_the_served_tail_of_a_straddling_chunk():
+    """A 50k chunk that starts before the node's horizon must yield its served tail, not be dropped whole."""
+
+    class DepthLimitedEth(StubEth):
+        horizon = 10_000
+
+        def get_logs(self, params):
+            if params["fromBlock"] < self.block_number - self.horizon:
+                raise RuntimeError("403 Client Error: Forbidden for url: https://node/")
+            return [
+                {
+                    "address": TOKEN,
+                    "topics": [b"\x00" * 32],
+                    "data": b"",
+                    "blockNumber": b,
+                    "transactionHash": b"\x01" * 32,
+                }
+                for b in range(params["fromBlock"], params["toBlock"] + 1)
+                if b % 1_000 == 0
+            ]
+
+    eth = DepthLimitedEth(FakeEvmClient())
+    eth.block_number = 200_000
+    client = Web3EvmClient(StubW3(eth), chain_id=1)
+    client.backoff_s = 0.0
+    # one 50k chunk from 150_000 to 200_000 straddles the horizon at 190_000, with no prior knowledge
+    entries, served_from = client.get_logs_window(TOKEN, [None], 150_000, 200_000, chunk=50_001)
+    assert served_from is not None and 190_000 <= served_from <= 191_000
+    blocks = sorted(e.block_number for e in entries)
+    assert blocks and blocks[0] >= 190_000 and blocks[-1] == 200_000 and len(blocks) >= 9
+
+
 def test_non_range_errors_propagate():
     class Broken(StubEth):
         def get_logs(self, params):
