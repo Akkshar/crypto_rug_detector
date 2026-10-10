@@ -567,6 +567,69 @@ def serve(
     uvicorn.run(application, host=host, port=port, log_level="info")
 
 
+@app.command("label-from-goplus")
+def label_from_goplus(
+    chain: Annotated[Chain, typer.Option("--chain", "-c")] = Chain.ETHEREUM,
+    cache: Annotated[Path | None, typer.Option(help="SQLite cache whose unlabelled tokens get weak labels")] = None,
+    addresses: Annotated[Path | None, typer.Option(help="Text/CSV file of addresses instead of the cache")] = None,
+    benign_if_clean: Annotated[
+        bool, typer.Option(help="Also label clean tokens benign (open source, LP locked, low tax)")
+    ] = True,
+    overwrite: Annotated[bool, typer.Option(help="Replace existing labels")] = False,
+    csv_out: Annotated[
+        Path | None, typer.Option("--csv-out", "-o", help="Write a chain,address,label CSV for import-corpus")
+    ] = None,
+) -> None:
+    """Weak-label tokens with GoPlus token-security verdicts (free API, no key). See `sources.py` for caveats."""
+    import csv
+
+    from src.backtest.sources import weak_labels
+
+    _utf8_stdout()
+    store = _open_cache(cache)
+    targets: list[str] = []
+    if addresses is not None:
+        for line in addresses.read_text(encoding="utf-8").splitlines():
+            cell = line.split(",")[0].strip()
+            if cell.startswith("0x") and len(cell) == 42:
+                targets.append(cell)
+    elif store is not None:
+        targets = sorted({s.address for s, _, lbl in store.iter_snapshots(chain=chain) if overwrite or lbl is None})
+    if not targets:
+        err.print(
+            "[bold red]error:[/bold red] nothing to label; pass --addresses or a --cache with snapshots on that chain"
+        )
+        raise typer.Exit(code=2)
+
+    results = weak_labels(chain, targets, benign_if_clean=benign_if_clean)
+    counts = {"rug": 0, "benign": 0, "undecided": 0}
+    rows: list[tuple[str, str, str]] = []
+    try:
+        for r in results:
+            if r.label is None:
+                counts["undecided"] += 1
+                err.print(f"[dim]{r.address}: undecided ({', '.join(r.reasons) or 'no signal'})[/dim]")
+                continue
+            counts[r.label] += 1
+            rows.append((chain.value, r.address, r.label))
+            if store is not None:
+                store.set_label(chain, r.address, r.label)
+            err.print(f"{r.address}: [bold]{r.label}[/bold] – {', '.join(r.reasons)}")
+    finally:
+        if store is not None:
+            store.close()
+    if csv_out:
+        with csv_out.open("w", encoding="utf-8", newline="") as fh:
+            w = csv.writer(fh)
+            w.writerow(["chain", "address", "label"])
+            w.writerows(rows)
+        err.print(f"[dim]{len(rows)} labelled row(s) written to {csv_out}[/dim]")
+    out.print(
+        f"GoPlus weak labels on {chain.value}: {counts['rug']} rug, {counts['benign']} benign, {counts['undecided']} undecided"
+    )
+    out.print("[dim]Weak labels partly overlap this project's own rules – report them as such in any evaluation.[/dim]")
+
+
 @app.command("export-snapshots")
 def export_snapshots(
     output: Annotated[Path, typer.Argument(help="Destination .jsonl")],

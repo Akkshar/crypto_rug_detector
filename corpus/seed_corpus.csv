@@ -1,0 +1,4 @@
+chain,address,label,block,source
+ethereum,0x1111111111111111111111111111111111111111,benign,,offline fixture – replace with real tokens
+bsc,0x2222222222222222222222222222222222222222,rug,,offline fixture – replace with real tokens
+base,0x3333333333333333333333333333333333333333,rug,,offline fixture – replace with real tokens
