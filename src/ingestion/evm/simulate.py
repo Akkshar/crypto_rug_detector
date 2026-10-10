@@ -46,6 +46,12 @@ def word(value: int) -> str:
     return "0x" + value.to_bytes(32, "big").hex()
 
 
+def pool_fee_from_label(label: str) -> int | None:
+    """``uniswap_v3_3000`` → 3000; v2 labels have no fee suffix."""
+    tail = label.rsplit("_", 1)[-1]
+    return int(tail) if tail.isdigit() else None
+
+
 def balance_slot_key(holder: str, slot: int) -> str:
     return "0x" + keccak(encode(["address", "uint256"], [holder, slot])).hex()
 
@@ -77,12 +83,14 @@ class SellSimulator:
     def simulate(self, token: str, pool: LiquidityPool) -> SellSimulation | None:
         token = to_checksum_address(token)
         dex = self._dex_for(pool)
-        if dex is None or dex.kind is not DexKind.V2:
-            log.info("sell simulation skipped: %s is not a v2-style DEX", pool.dex)
+        if dex is None:
+            log.info("sell simulation skipped: %s is not a configured DEX", pool.dex)
             return None
         if self.cfg.quote_tokens.get(pool.quote_token) != self.cfg.wrapped_native:
             log.info("sell simulation skipped: %s pool is not quoted in native", pool.quote_token)
             return None
+        if dex.kind is DexKind.V3:
+            return self._simulate_v3(token, pool, dex)
 
         router, wn = dex.router, self.cfg.wrapped_native
         funded: StateOverride = {PROBE_SENDER: {"balance": hex(ONE_ETHER)}}
@@ -148,6 +156,107 @@ class SellSimulator:
         )
 
     # ------------------------------------------------------------------ #
+    # Uniswap v3 (exactInputSingle on SwapRouter / SwapRouter02)
+    # ------------------------------------------------------------------ #
+    def _simulate_v3(self, token: str, pool: LiquidityPool, dex: Any) -> SellSimulation | None:
+        router, wn = dex.router, self.cfg.wrapped_native
+        fee = pool_fee_from_label(pool.dex)
+        if fee is None:
+            return None
+        quote = self._v3_expected_output(pool.pair_address, token, wn)
+        if quote is None:
+            return self._failed("could not read pool price (slot0)")
+        price_token_per_wei, _ = quote  # raw tokens per 1 wei of native at spot, before the pool fee
+        fee_factor = 1 - fee / 1_000_000  # the pool fee is taken from the input of *each* leg
+        funded: StateOverride = {PROBE_SENDER: {"balance": hex(ONE_ETHER)}}
+
+        def exact_input(token_in: str, token_out: str, amount_in: int, min_out: int, value: int = 0) -> abi.Call:
+            params: tuple[Any, ...]
+            if dex.router_kind == "swap_router02":
+                sig = "exactInputSingle((address,address,uint24,address,uint256,uint256,uint160))"
+                params = (token_in, token_out, fee, PROBE_SENDER, amount_in, min_out, 0)
+            else:  # SwapRouter (v1) carries a deadline
+                sig = "exactInputSingle((address,address,uint24,address,uint256,uint256,uint256,uint160))"
+                params = (token_in, token_out, fee, PROBE_SENDER, DEADLINE, amount_in, min_out, 0)
+            return abi.Call(router, sig, (params,), value=value)
+
+        # -- buy: native → token (router wraps msg.value) ------------------ #
+        buy_quote = int(self.buy_amount * price_token_per_wei * fee_factor)
+        if buy_quote <= 0:
+            return self._failed("pool price implies zero output for the probe buy")
+        received, reason = self._max_output(
+            lambda m: exact_input(wn, token, self.buy_amount, m, self.buy_amount), buy_quote, funded
+        )
+        if received is None:
+            return self._failed(f"buy reverted: {reason}")
+        buy_gas = self._gas(exact_input(wn, token, self.buy_amount, 0, self.buy_amount), funded)
+        effective_buy_tax = self._tax_pct(received, buy_quote)
+
+        slot = self._find_balance_slot(token, received)
+        if slot is None:
+            return self._failed("could not locate balances storage slot (non-standard layout)", buy_gas=buy_gas)
+        allowance_key = self._find_allowance_key(token, router, received)
+        if allowance_key is None:
+            return self._failed("could not locate allowance storage slot (non-standard layout)", buy_gas=buy_gas)
+
+        # -- sell: token → native (WETH stays wrapped; fine for a simulation) -- #
+        succeeded, sell_gas, worst_tax, last_reason = 0, None, None, None
+        for attempt in range(self.attempts):
+            amount = received >> attempt
+            if amount == 0:
+                break
+            sell_quote = int(amount / price_token_per_wei * fee_factor) if price_token_per_wei else 0
+            if sell_quote <= 0:
+                last_reason = "pool price implies zero output for the sell"
+                continue
+            state: StateOverride = {
+                PROBE_SENDER: {"balance": hex(ONE_ETHER)},
+                token: {"stateDiff": {balance_slot_key(PROBE_SENDER, slot): word(amount), allowance_key: word(amount)}},
+            }
+
+            def sell_call(min_out: int, amt: int = amount) -> abi.Call:
+                return exact_input(token, wn, amt, min_out)
+
+            out, reason = self._max_output(sell_call, sell_quote, state)
+            if out is None:
+                last_reason = reason
+                continue
+            succeeded += 1
+            tax = self._tax_pct(out, sell_quote)
+            worst_tax = tax if worst_tax is None else max(worst_tax, tax)
+            if sell_gas is None:
+                sell_gas = self._gas(exact_input(token, wn, amount, 0), state)
+
+        return SellSimulation(
+            attempted=self.attempts,
+            succeeded=succeeded,
+            buy_gas=buy_gas,
+            sell_gas=sell_gas,
+            effective_buy_tax_pct=effective_buy_tax,
+            effective_sell_tax_pct=worst_tax,
+            revert_reason=last_reason if succeeded < self.attempts else None,
+        )
+
+    def _v3_expected_output(self, pool: str, token: str, wn: str) -> tuple[float, bool] | None:
+        """Fee-adjusted spot price from slot0: (raw token units per wei of native, token_is_token0).
+
+        Spot price ignores price impact, so measured "tax" on a thin pool includes slippage; the probe
+        trade is deliberately tiny (0.01 native) to keep that negligible, and reverts are exact regardless.
+        """
+        raw0 = self.client.try_call(abi.v2_token0(pool))
+        raw_slot = self.client.try_call(abi.v3_slot0(pool))
+        if raw0 is None or raw_slot is None:
+            return None
+        token0 = abi.v2_token0(pool).one(raw0)
+        sqrt_price = abi.v3_slot0(pool).parse(raw_slot)[0]
+        if sqrt_price == 0:
+            return None
+        price01 = (sqrt_price / 2**96) ** 2  # raw token1 per raw token0
+        token_is_token0 = token0 == token
+        tokens_per_wei = (1 / price01) if token_is_token0 else price01
+        return tokens_per_wei, token_is_token0
+
+    # ------------------------------------------------------------------ #
     def _dex_for(self, pool: LiquidityPool):
         name = pool.dex
         if name not in self.cfg.dexes and "_" in name and name.rsplit("_", 1)[1].isdigit():
@@ -201,20 +310,29 @@ class SellSimulator:
 
     def _find_balance_slot(self, token: str, planted: int) -> int | None:
         call = abi.erc20_balance_of(token, PROBE_SENDER)
-        for slot in range(self.max_slot):
-            state = {token: {"stateDiff": {balance_slot_key(PROBE_SENDER, slot): word(planted)}}}
-            got = self._try_int(call, state)
-            if got == planted:
-                return slot
-        return None
+        return self._bisect_slot(token, call, planted, lambda s: balance_slot_key(PROBE_SENDER, s))
 
     def _find_allowance_key(self, token: str, spender: str, planted: int) -> str | None:
         call = abi.Call(token, "allowance(address,address)", (PROBE_SENDER, spender), returns=("uint256",))
-        for slot in range(self.max_slot):
-            key = allowance_slot_key(PROBE_SENDER, spender, slot)
-            if self._try_int(call, {token: {"stateDiff": {key: word(planted)}}}) == planted:
-                return key
-        return None
+        slot = self._bisect_slot(token, call, planted, lambda s: allowance_slot_key(PROBE_SENDER, spender, s))
+        return allowance_slot_key(PROBE_SENDER, spender, slot) if slot is not None else None
+
+    def _bisect_slot(self, token: str, call: abi.Call, planted: int, key_for: Callable[[int], str]) -> int | None:
+        """Locate the mapping slot in O(log n) calls: plant the sentinel in *every* candidate slot at once
+        (keys are keccak-derived, so they never collide), then halve the planted set while the getter still
+        echoes the sentinel. ~6 calls for 30 candidates instead of 30."""
+        candidates = list(range(self.max_slot))
+
+        def echoes(slots: list[int]) -> bool:
+            state = {token: {"stateDiff": {key_for(s): word(planted) for s in slots}}}
+            return self._try_int(call, state) == planted
+
+        if not candidates or not echoes(candidates):
+            return None
+        while len(candidates) > 1:
+            half = candidates[: len(candidates) // 2]
+            candidates = half if echoes(half) else candidates[len(half) :]
+        return candidates[0]
 
     def _try_int(self, call: abi.Call, state: StateOverride) -> int | None:
         try:

@@ -194,20 +194,25 @@ class RPCDataProvider(BaseDataProvider):
                 deployer = deployer.model_copy(update={"funded_wallets": funded})
 
         trades = None
-        if pools and pools[0].dex in cfg.dexes:  # v2-style primary pool – v3 Swap events have a different shape
+        if pools:
             primary = pools[0]
-            trades = self._safe(
-                lambda: analyse_swaps(
-                    client,
-                    primary.pair_address,
-                    token_is_token0=self._is_token0(client, primary.pair_address, token),
-                    quote_decimals=discovery.decimals(cfg.quote_tokens[primary.quote_token]),
-                    from_block=primary.created_block or max(0, block_number - self.swap_window_blocks),
-                    to_block=block_number,
-                    created_block=primary.created_block,
-                ),
-                "swap analysis",
-            )
+            dex_name = primary.dex if primary.dex in cfg.dexes else primary.dex.rsplit("_", 1)[0]
+            dex_cfg = cfg.dexes.get(dex_name)
+            if dex_cfg is not None:
+                swap_kind = "v3" if dex_cfg.kind.value == "v3" else "v2"
+                trades = self._safe(
+                    lambda: analyse_swaps(
+                        client,
+                        primary.pair_address,
+                        token_is_token0=self._is_token0(client, primary.pair_address, token),
+                        quote_decimals=discovery.decimals(cfg.quote_tokens[primary.quote_token]),
+                        from_block=primary.created_block or max(0, block_number - self.swap_window_blocks),
+                        to_block=block_number,
+                        created_block=primary.created_block,
+                        kind=swap_kind,
+                    ),
+                    "swap analysis",
+                )
 
         sell_sim = None
         if self.simulate_sells and pools:

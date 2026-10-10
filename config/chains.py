@@ -37,6 +37,18 @@ class DexConfig(_Cfg):
     factory: Addr
     router: Addr
     fee_tiers: list[int] = Field(default_factory=lambda: [500, 3000, 10000])
+    #: v3 only – NonfungiblePositionManager; without it LP lock status stays unresolved for v3 pools.
+    position_manager: Addr | None = None
+    #: v3 only – "swap_router" (exactInputSingle with deadline) or "swap_router02" (no deadline).
+    router_kind: str = Field("v2", pattern=r"^(v2|swap_router|swap_router02)$")
+
+    @model_validator(mode="after")
+    def _router_kind_matches(self) -> DexConfig:
+        if self.kind is DexKind.V2 and self.router_kind != "v2":
+            raise ValueError("router_kind must be 'v2' for v2 DEXes")
+        if self.kind is DexKind.V3 and self.router_kind == "v2":
+            object.__setattr__(self, "router_kind", "swap_router")
+        return self
 
 
 class PriceSource(_Cfg):

@@ -123,10 +123,13 @@ def test_size_gated_sell_passes_only_small_amounts():
     assert "Max sell" in sim.revert_reason
 
 
-def test_skips_v3_and_non_native_quotes():
+def test_skips_unknown_dex_and_non_native_quotes():
     s = simulator(make_client())
-    assert s.simulate(TOKEN, pool(dex="uniswap_v3_3000")) is None
+    assert s.simulate(TOKEN, pool(dex="not_a_dex")) is None
     assert s.simulate(TOKEN, pool(quote="USDC")) is None
+    # a v3 pool is routed to the v3 path; without slot0 it fails explicitly rather than being skipped
+    v3 = s.simulate(TOKEN, pool(dex="uniswap_v3_3000"))
+    assert v3 is not None and v3.succeeded == 0 and "slot0" in v3.revert_reason
 
 
 def test_unquotable_buy_and_missing_slot():

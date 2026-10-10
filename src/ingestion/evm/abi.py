@@ -19,8 +19,21 @@ def selector(signature: str) -> bytes:
 
 
 def _arg_types(signature: str) -> list[str]:
+    """Top-level argument types of ``name(t1,t2,…)`` – tuple types such as ``(address,uint24)[]`` stay intact."""
     inner = signature[signature.index("(") + 1 : signature.rindex(")")]
-    return [t.strip() for t in inner.split(",") if t.strip()]
+    types: list[str] = []
+    depth, current = 0, ""
+    for ch in inner:
+        if ch == "," and depth == 0:
+            if current.strip():
+                types.append(current.strip())
+            current = ""
+            continue
+        depth += {"(": 1, ")": -1}.get(ch, 0)
+        current += ch
+    if current.strip():
+        types.append(current.strip())
+    return types
 
 
 def encode_call(signature: str, *args: Any) -> bytes:

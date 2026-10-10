@@ -34,9 +34,11 @@ chains:
         kind: v3
         factory: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
         router:  "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+        router_kind: swap_router
+        position_manager: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88"
         fee_tiers: [500, 3000, 10000]
     lockers:
-      uncx:         ["0x663A5C229c09b049E36dCc11a9B0d4a8Eb9db214", "0x17e00383A843A9922bCA3B280C0ADE9f8BA48449"]
+      uncx:         ["0x663A5C229c09b049E36dCc11a9B0d4a8Eb9db214", "0x17e00383A843A9922bCA3B280C0ADE9f8BA48449", "0x7f5C649856F900d15C83741f45AE46f5C6858234"]
       team_finance: ["0xE2fE530C047f2d85298b07D9333C05737f1435fB"]
       pinklock:     ["0x71B5759d73262FBb223956913ecF4ecC51057641"]
     mixers:
@@ -79,6 +81,8 @@ chains:
         kind: v3
         factory: "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865"
         router:  "0x13f4EA83D0bd40E75C8222255bc855a974568Dd4"
+        router_kind: swap_router
+        position_manager: "0x46A15B0b27311cedF172AB29E4f4766fbE7F4364"
         fee_tiers: [100, 500, 2500, 10000]
     lockers:
       uncx:         ["0xC765bddB93b0D1c1A88282BA0fa6B2d00E3e0c83"]
@@ -111,6 +115,8 @@ chains:
         kind: v3
         factory: "0x1F98431c8aD98523631AE4a59f267346ea31F984"
         router:  "0xE592427A0AEce92De3Edee1F18E0157C05861564"
+        router_kind: swap_router
+        position_manager: "0xC36442b4a4522E871399CD717aBDD847Ab11FE88"
         fee_tiers: [500, 3000, 10000]
       camelot_v2:
         kind: v2
@@ -149,6 +155,8 @@ chains:
         kind: v3
         factory: "0x33128a8fC17869897dcE68Ed026d694621f6FDfD"
         router:  "0x2626664c2603336E57B271c5C0b26F421741e481"
+        router_kind: swap_router02
+        position_manager: "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1"
         fee_tiers: [500, 3000, 10000]
       aerodrome:
         kind: v2

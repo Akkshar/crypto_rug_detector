@@ -162,7 +162,9 @@ class PoolDiscovery:
                 else:
                     quote_res = abi.erc20_balance_of(quote, pool).one(a)
                     token_res = abi.erc20_balance_of(token, pool).one(b)
-                    holdings, created, created_block = [], None, None  # v3 positions are NFTs – lock status unresolved
+                    holdings, created, created_block = self.lp_holdings_v3(
+                        dex_name, pool, token, quote, fee or 0, deployer=deployer, owner=owner
+                    )
                     dex_label = f"{dex_name}_{fee}"
             except Exception as exc:  # noqa: BLE001
                 log.warning("%s pool %s undecodable: %s", dex_name, pool, exc)
@@ -182,6 +184,35 @@ class PoolDiscovery:
                 )
             )
         return sorted(pools, key=lambda p: -p.liquidity_usd)
+
+    # ------------------------------------------------------------------ #
+    # LP holders (v3: NPM position NFTs)
+    # ------------------------------------------------------------------ #
+    def lp_holdings_v3(
+        self, dex_name: str, pool: str, token: str, quote: str, fee: int, *, deployer: str | None, owner: str | None
+    ) -> tuple[list[LPHolding], datetime | None, int | None]:
+        from src.ingestion.evm.v3_positions import pool_created_block, v3_lp_holdings
+
+        created_block = pool_created_block(self.client, pool, log_chunk=self.log_chunk, max_chunks=self.max_log_chunks)
+        npm = self.cfg.dexes[dex_name].position_manager
+        if npm is None or created_block is None:
+            return [], None, created_block  # lock status stays unknown without a position manager
+        token0, token1 = sorted((token, quote), key=str.lower)
+        holdings = v3_lp_holdings(
+            self.client,
+            self.cfg,
+            self.registry,
+            npm=npm,
+            pool=pool,
+            token0=token0,
+            token1=token1,
+            fee=fee,
+            from_block=created_block,
+            deployer=deployer,
+            owner=owner,
+            log_chunk=self.log_chunk,
+        )
+        return holdings, None, created_block
 
     # ------------------------------------------------------------------ #
     # LP holders (v2 pair == LP token)

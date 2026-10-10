@@ -22,6 +22,11 @@ from src.models.risk_report import TradeActivity
 log = logging.getLogger("rugscan.trades")
 
 SWAP_TOPIC = keccak(text="Swap(address,uint256,uint256,uint256,uint256,address)")
+V3_SWAP_TOPIC = keccak(text="Swap(address,address,int256,int256,uint160,uint128,int24)")
+
+
+def _signed(data: bytes, index: int) -> int:
+    return int.from_bytes(data[32 * index : 32 * (index + 1)], "big", signed=True)
 
 
 @dataclass(frozen=True)
@@ -50,6 +55,7 @@ def analyse_swaps(
     max_swaps: int = 2_000,
     max_tx_lookups: int = 400,
     log_chunk: int = 50_000,
+    kind: str = "v2",
 ) -> TradeActivity:
     pair = to_checksum_address(pair)
     hi = to_block if to_block is not None else client.block_number()
@@ -57,18 +63,29 @@ def analyse_swaps(
     tx_cache: dict[str, str | None] = {}
     lookups = 0
     truncated = False
+    topic = V3_SWAP_TOPIC if kind == "v3" else SWAP_TOPIC
 
     for lo, chunk_hi in chunked_ranges(from_block, hi, log_chunk):
-        for entry in client.get_logs(pair, [SWAP_TOPIC], lo, chunk_hi):
-            if len(entry.data) < 128:
-                continue
-            a0_in, a1_in, a0_out, a1_out = (_word(entry.data, i) for i in range(4))
-            # token0/token1 are fixed per pair; the quote asset is whichever side the token is not.
-            token_out = a0_out if token_is_token0 else a1_out
-            quote_in = a1_in if token_is_token0 else a0_in
-            quote_out = a1_out if token_is_token0 else a0_out
-            is_buy = token_out > 0
-            quote_amount = quote_in if is_buy else quote_out
+        for entry in client.get_logs(pair, [topic], lo, chunk_hi):
+            if kind == "v3":
+                if len(entry.data) < 64:
+                    continue
+                # v3: signed deltas from the pool's view – positive = paid in, negative = paid out.
+                amount0, amount1 = _signed(entry.data, 0), _signed(entry.data, 1)
+                token_delta = amount0 if token_is_token0 else amount1
+                quote_delta = amount1 if token_is_token0 else amount0
+                is_buy = token_delta < 0
+                quote_amount = abs(quote_delta)
+            else:
+                if len(entry.data) < 128:
+                    continue
+                a0_in, a1_in, a0_out, a1_out = (_word(entry.data, i) for i in range(4))
+                # token0/token1 are fixed per pair; the quote asset is whichever side the token is not.
+                token_out = a0_out if token_is_token0 else a1_out
+                quote_in = a1_in if token_is_token0 else a0_in
+                quote_out = a1_out if token_is_token0 else a0_out
+                is_buy = token_out > 0
+                quote_amount = quote_in if is_buy else quote_out
 
             trader: str | None
             if entry.tx_hash in tx_cache:
