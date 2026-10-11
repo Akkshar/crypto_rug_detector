@@ -142,3 +142,23 @@ def test_provider_wires_swap_analysis():
     snap = make_provider(chain).fetch_sync(Chain.ETHEREUM, TOKEN)
     assert snap.trades is not None and snap.trades.buys == 3 and snap.trades.unique_buyers == 3
     assert snap.trades.created_block == 10 and snap.trades.from_block == 10
+
+
+def test_trader_lookups_are_batched_and_deduplicated():
+    c = FakeEvmClient(latest_block=300)
+    b = SwapBuilder(c)
+    for i in range(1, 6):
+        b.swap(wallet(i), buy=True, quote=10**18, block=100 + i)
+    # two swaps in one transaction (e.g. a multi-hop route) share a hash → one lookup
+    dup = "0x" + f"{1:064x}"
+    c.logs.append(LogEntry(PAIR, c.logs[0].topics, c.logs[0].data, 101, dup, 99))
+
+    t = analyse(c)
+    assert t.swaps == 6 and t.unique_traders == 5
+    assert c.tx_lookups == 0, "trader identity must not be resolved one call at a time"
+    assert c.tx_batches == [[("0x" + f"{i:064x}") for i in range(1, 6)]]
+
+    c.tx_batches.clear()
+    capped = analyse(c, max_tx_lookups=2)
+    assert c.tx_batches == [[("0x" + f"{1:064x}"), ("0x" + f"{2:064x}")]]
+    assert capped.traders_resolved is False and capped.unique_traders == 2

@@ -62,6 +62,17 @@ class TxInfo:
 StateOverride = Mapping[str, Mapping[str, Any]]
 
 
+def _tx_info(tx_hash: str, tx: Any) -> TxInfo:
+    return TxInfo(
+        hash=tx_hash,
+        sender=to_checksum_address(tx["from"]),
+        to=to_checksum_address(tx["to"]) if tx.get("to") else None,
+        value=int(tx["value"]),
+        block_number=int(tx["blockNumber"]),
+        input=bytes(tx.get("input", b"")),
+    )
+
+
 class EvmClient(Protocol):
     chain_id: int
     #: When set, every read is pinned to this block (time-travel snapshots).
@@ -102,6 +113,10 @@ class EvmClient(Protocol):
 
     def get_transaction(self, tx_hash: str) -> TxInfo | None: ...
 
+    def get_transactions(self, tx_hashes: list[str]) -> dict[str, TxInfo | None]:
+        """Resolve many transactions at once (JSON-RPC batch where the node allows it)."""
+        ...
+
     def estimate_gas(
         self, to: str, data: bytes, *, sender: str, value: int = 0, state_override: StateOverride | None = None
     ) -> int: ...
@@ -112,6 +127,8 @@ class EvmClient(Protocol):
 
 class Web3EvmClient:
     MULTICALL_CHUNK = 200
+    TX_BATCH = 100
+    TX_BATCH_FAILURES = 2
 
     def __init__(
         self,
@@ -126,6 +143,8 @@ class Web3EvmClient:
         self.block = block
         self.multicall = multicall
         self._multicall_ok: bool | None = None
+        self._batch_ok = True
+        self._batch_failures = 0
         #: Largest block span the node has accepted for eth_getLogs so far (learned on the first rejection).
         self.log_span_hint: int | None = None
         #: Largest span that has actually succeeded – the proof that a refusal is about depth, not size.
@@ -392,14 +411,49 @@ class Web3EvmClient:
             tx = self.w3.eth.get_transaction(tx_hash)
         except Exception:  # noqa: BLE001
             return None
-        return TxInfo(
-            hash=tx_hash,
-            sender=to_checksum_address(tx["from"]),
-            to=to_checksum_address(tx["to"]) if tx.get("to") else None,
-            value=int(tx["value"]),
-            block_number=int(tx["blockNumber"]),
-            input=bytes(tx.get("input", b"")),
-        )
+        return _tx_info(tx_hash, tx)
+
+    def get_transactions(self, tx_hashes: list[str]) -> dict[str, TxInfo | None]:
+        """Resolve transactions in JSON-RPC batches of ``TX_BATCH`` (one HTTP round trip each).
+
+        Falls back to one call per hash for a batch the node rejects - a pruned transaction makes
+        web3 raise for the whole batch - and stops batching altogether once ``TX_BATCH_FAILURES``
+        consecutive batches failed, which is what a node without JSON-RPC batch support looks like.
+        """
+        out: dict[str, TxInfo | None] = {}
+        pending = list(dict.fromkeys(tx_hashes))
+        for start in range(0, len(pending), self.TX_BATCH):
+            chunk = pending[start : start + self.TX_BATCH]
+            if self._batch_ok:
+                try:
+                    out.update(self._batch_transactions(chunk))
+                    self._batch_failures = 0
+                    continue
+                except Exception as exc:  # noqa: BLE001
+                    self._batch_failures += 1
+                    log.info(
+                        "batched eth_getTransactionByHash failed (%s); resolving %d one by one",
+                        _short(exc),
+                        len(chunk),
+                    )
+                    if self._batch_failures >= self.TX_BATCH_FAILURES:
+                        log.info("disabling JSON-RPC batching for this client after %d failures", self._batch_failures)
+                        self._batch_ok = False
+            for h in chunk:
+                out[h] = self.get_transaction(h)
+        return out
+
+    def _batch_transactions(self, tx_hashes: list[str]) -> dict[str, TxInfo | None]:
+        def run() -> list[Any]:
+            with self.w3.batch_requests() as batch:
+                for h in tx_hashes:
+                    batch.add(self.w3.eth.get_transaction(h))
+                return list(batch.execute())
+
+        results = self._with_retry(run, f"getTransaction[x{len(tx_hashes)}]")
+        if len(results) != len(tx_hashes):
+            raise RuntimeError(f"batch returned {len(results)} results for {len(tx_hashes)} requests")
+        return {h: _tx_info(h, tx) if tx else None for h, tx in zip(tx_hashes, results, strict=True)}
 
     def estimate_gas(
         self, to: str, data: bytes, *, sender: str, value: int = 0, state_override: StateOverride | None = None
@@ -433,6 +487,8 @@ class FakeEvmClient:
     code: dict[str, bytes] = field(default_factory=dict)
     logs: list[LogEntry] = field(default_factory=list)
     transactions: dict[str, TxInfo] = field(default_factory=dict)
+    tx_lookups: int = 0
+    tx_batches: list[list[str]] = field(default_factory=list)
     gas: dict[tuple[str, str], int] = field(default_factory=dict)
     latest_block: int = 20_000_000
     block: int | None = None
@@ -539,7 +595,12 @@ class FakeEvmClient:
         return self.min_served_block if self.min_served_block <= hi else None
 
     def get_transaction(self, tx_hash: str) -> TxInfo | None:
+        self.tx_lookups += 1
         return self.transactions.get(tx_hash)
+
+    def get_transactions(self, tx_hashes: list[str]) -> dict[str, TxInfo | None]:
+        self.tx_batches.append(list(tx_hashes))
+        return {h: self.transactions.get(h) for h in tx_hashes}
 
     def estimate_gas(
         self, to: str, data: bytes, *, sender: str, value: int = 0, state_override: StateOverride | None = None
