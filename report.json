@@ -1,0 +1,270 @@
+{
+  "schema_version": 1,
+  "chain": "base",
+  "address": "0x3333333333333333333333333333333333333333",
+  "token_name": "BaseAI Yield",
+  "token_symbol": "BAIY",
+  "generated_at": "2026-10-11T14:50:42.899597Z",
+  "provider": "mock",
+  "risk_score": 99.8,
+  "risk_tier": "CRITICAL",
+  "rule_score": 100.0,
+  "ml": {
+    "model": "gbm+isoforest/synthetic-v1",
+    "rug_probability": 0.9926784295273363,
+    "anomaly_score": -0.0391088574011359,
+    "is_out_of_distribution": false,
+    "imputed_features": [],
+    "features": {
+      "top10_concentration": 0.8913043478260869,
+      "is_lp_locked": 0.0,
+      "max_tax_rate": 5.6,
+      "has_mint_function": 1.0,
+      "deployer_age_days": 1.6666666666666667,
+      "tvl_usd": 18500.0
+    },
+    "contributions": {
+      "top10_concentration": 0.0277,
+      "is_lp_locked": 0.0222,
+      "max_tax_rate": 0.0,
+      "has_mint_function": 0.0046,
+      "deployer_age_days": 0.0128,
+      "tvl_usd": 0.0053
+    },
+    "reliable": true
+  },
+  "hard_fail": false,
+  "hard_fail_reasons": [],
+  "breakdown": [
+    {
+      "category": "CONTRACT_PRIVILEGE",
+      "raw_points": 37.0,
+      "capped_points": 37.0,
+      "cap": 50.0,
+      "flag_count": 2
+    },
+    {
+      "category": "LIQUIDITY",
+      "raw_points": 55.0,
+      "capped_points": 50.0,
+      "cap": 50.0,
+      "flag_count": 3
+    },
+    {
+      "category": "HONEYPOT",
+      "raw_points": 0.0,
+      "capped_points": 0.0,
+      "cap": 60.0,
+      "flag_count": 0
+    },
+    {
+      "category": "DISTRIBUTION",
+      "raw_points": 30.0,
+      "capped_points": 30.0,
+      "cap": 30.0,
+      "flag_count": 2
+    },
+    {
+      "category": "DEPLOYER",
+      "raw_points": 71.0,
+      "capped_points": 35.0,
+      "cap": 35.0,
+      "flag_count": 4
+    },
+    {
+      "category": "TRADING",
+      "raw_points": 18.0,
+      "capped_points": 18.0,
+      "cap": 30.0,
+      "flag_count": 2
+    }
+  ],
+  "flags": [
+    {
+      "code": "OWNER_ACTIVE_EOA",
+      "category": "CONTRACT_PRIVILEGE",
+      "severity": "HIGH",
+      "title": "Owner is an active EOA",
+      "detail": "owner() = 0xAAaa000000000000000000000000000000000003 is a single externally-owned key with full privileged access",
+      "points": 12.0,
+      "evidence": {
+        "owner": "0xAAaa000000000000000000000000000000000003"
+      }
+    },
+    {
+      "code": "HIDDEN_MINT_FUNCTION",
+      "category": "CONTRACT_PRIVILEGE",
+      "severity": "CRITICAL",
+      "title": "Hidden supply-expansion function",
+      "detail": "_rebalanceSupply() not in the published ABI but can expand supply (guard: onlyOwner)",
+      "points": 25.0,
+      "evidence": {
+        "functions": [
+          "_rebalanceSupply"
+        ],
+        "selectors": [
+          "0x7c3a1f2e"
+        ],
+        "restricted_to": "onlyOwner"
+      }
+    },
+    {
+      "code": "LP_MOSTLY_UNLOCKED",
+      "category": "LIQUIDITY",
+      "severity": "CRITICAL",
+      "title": "LP mostly unlocked (100%)",
+      "detail": "Only 0% of uniswap_v2 LP is locked/burned – liquidity can be pulled at any time",
+      "points": 30.0,
+      "evidence": {
+        "dex": "uniswap_v2",
+        "locked_share": 0,
+        "lockers": []
+      }
+    },
+    {
+      "code": "LP_HELD_BY_INSIDER",
+      "category": "LIQUIDITY",
+      "severity": "HIGH",
+      "title": "Deployer/owner holds 100% of LP",
+      "detail": "Unlocked LP in insider wallets is the direct mechanism for a liquidity-drain exit",
+      "points": 15.0,
+      "evidence": {
+        "insider_share": 1.0
+      }
+    },
+    {
+      "code": "FDV_LIQUIDITY_IMBALANCE",
+      "category": "LIQUIDITY",
+      "severity": "MEDIUM",
+      "title": "FDV is 227× liquidity",
+      "detail": "FDV $4,200,000 vs $18,500 pooled – inflated valuation relative to depth",
+      "points": 10.0,
+      "evidence": {
+        "fdv_usd": 4200000.0,
+        "liquidity_usd": 18500.0,
+        "ratio": 227.0
+      }
+    },
+    {
+      "code": "TOP10_CONCENTRATION_HIGH",
+      "category": "DISTRIBUTION",
+      "severity": "HIGH",
+      "title": "Top-10 wallets hold 89% of circulating supply",
+      "detail": "Excluding DEX/burn, 10 wallets control 89% (≥ 50%) – coordinated dump risk",
+      "points": 20.0,
+      "evidence": {
+        "top10_concentration": 0.8913,
+        "circulating_share": 0.92,
+        "holder_count": 1340
+      }
+    },
+    {
+      "code": "SINGLE_WHALE_DOMINANT",
+      "category": "DISTRIBUTION",
+      "severity": "MEDIUM",
+      "title": "Single wallet holds 41% of circulating supply",
+      "detail": "0xAAaa000000000000000000000000000000000003 (deployer) alone controls 41% of non-DEX supply",
+      "points": 10.0,
+      "evidence": {
+        "whale": "0xAAaa000000000000000000000000000000000003",
+        "whale_share": 0.413,
+        "label": "deployer"
+      }
+    },
+    {
+      "code": "DEPLOYER_MIXER_FUNDED",
+      "category": "DEPLOYER",
+      "severity": "CRITICAL",
+      "title": "Deployer funded from a mixer",
+      "detail": "First gas funding for 0xAAaa000000000000000000000000000000000003 came from Tornado Cash: 10 ETH – identity deliberately obscured",
+      "points": 25.0,
+      "evidence": {
+        "funding_source": "0x910Cbd523D972eb0a6f4cAe4618aD62622b39DbF",
+        "label": "Tornado Cash: 10 ETH"
+      }
+    },
+    {
+      "code": "DEPLOYER_PRIOR_RUGS",
+      "category": "DEPLOYER",
+      "severity": "CRITICAL",
+      "title": "Deployer linked to 2 prior rug(s)",
+      "detail": "0xAAaa000000000000000000000000000000000003 deployed 2 token(s) later flagged as rugs and is linked to 2 known scam address(es)",
+      "points": 30.0,
+      "evidence": {
+        "prior_rug_count": 2,
+        "linked_scam_addresses": [
+          "0xdDDD000000000000000000000000000000000001",
+          "0xDddD000000000000000000000000000000000002"
+        ]
+      }
+    },
+    {
+      "code": "DEPLOYER_SERIAL_LAUNCHER",
+      "category": "DEPLOYER",
+      "severity": "MEDIUM",
+      "title": "Serial launcher (14 contracts)",
+      "detail": "Deployer has deployed 14 contracts (≥ 10) – token-farm pattern",
+      "points": 8.0,
+      "evidence": {
+        "contracts_deployed": 14
+      }
+    },
+    {
+      "code": "DEPLOYER_FRESH_WALLET",
+      "category": "DEPLOYER",
+      "severity": "MEDIUM",
+      "title": "Fresh deployer wallet (1.7 days old)",
+      "detail": "Deployer first seen 1.7 days before observation (< 7) – no track record",
+      "points": 8.0,
+      "evidence": {
+        "age_days": 1.67
+      }
+    },
+    {
+      "code": "WASH_TRADING_SUSPECTED",
+      "category": "TRADING",
+      "severity": "MEDIUM",
+      "title": "72% of volume from 4 round-tripping wallet(s)",
+      "detail": "A handful of wallets both buying and selling generate 72% of volume – activity is manufactured, not organic demand",
+      "points": 10.0,
+      "evidence": {
+        "round_trip_wallets": 4,
+        "round_trip_volume_share": 0.72
+      }
+    },
+    {
+      "code": "LAUNCH_SNIPED",
+      "category": "TRADING",
+      "severity": "MEDIUM",
+      "title": "14 buys within 3 block(s) of launch",
+      "detail": "Bots or pre-positioned insiders bought the launch block – retail entered after the price was set",
+      "points": 8.0,
+      "evidence": {
+        "launch_window_buys": 14,
+        "launch_window_blocks": 3
+      }
+    }
+  ],
+  "warnings": [
+    "[CRITICAL] LP mostly unlocked (100%) — Only 0% of uniswap_v2 LP is locked/burned – liquidity can be pulled at any time",
+    "[CRITICAL] Deployer linked to 2 prior rug(s) — 0xAAaa000000000000000000000000000000000003 deployed 2 token(s) later flagged as rugs and is linked to 2 known scam address(es)",
+    "[CRITICAL] Hidden supply-expansion function — _rebalanceSupply() not in the published ABI but can expand supply (guard: onlyOwner)",
+    "[CRITICAL] Deployer funded from a mixer — First gas funding for 0xAAaa000000000000000000000000000000000003 came from Tornado Cash: 10 ETH – identity deliberately obscured",
+    "[HIGH] Top-10 wallets hold 89% of circulating supply — Excluding DEX/burn, 10 wallets control 89% (≥ 50%) – coordinated dump risk",
+    "[HIGH] Deployer/owner holds 100% of LP — Unlocked LP in insider wallets is the direct mechanism for a liquidity-drain exit",
+    "[HIGH] Owner is an active EOA — owner() = 0xAAaa000000000000000000000000000000000003 is a single externally-owned key with full privileged access",
+    "[MEDIUM] FDV is 227× liquidity — FDV $4,200,000 vs $18,500 pooled – inflated valuation relative to depth",
+    "[MEDIUM] Single wallet holds 41% of circulating supply — 0xAAaa000000000000000000000000000000000003 (deployer) alone controls 41% of non-DEX supply",
+    "[MEDIUM] 72% of volume from 4 round-tripping wallet(s) — A handful of wallets both buying and selling generate 72% of volume – activity is manufactured, not organic demand",
+    "[MEDIUM] Serial launcher (14 contracts) — Deployer has deployed 14 contracts (≥ 10) – token-farm pattern",
+    "[MEDIUM] Fresh deployer wallet (1.7 days old) — Deployer first seen 1.7 days before observation (< 7) – no track record",
+    "[MEDIUM] 14 buys within 3 block(s) of launch — Bots or pre-positioned insiders bought the launch block – retail entered after the price was set"
+  ],
+  "missing_data": [],
+  "critical_flags": [
+    "HIDDEN_MINT_FUNCTION",
+    "LP_MOSTLY_UNLOCKED",
+    "DEPLOYER_MIXER_FUNDED",
+    "DEPLOYER_PRIOR_RUGS"
+  ]
+}
