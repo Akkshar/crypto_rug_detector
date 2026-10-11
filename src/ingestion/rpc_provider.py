@@ -100,9 +100,13 @@ class RPCDataProvider(BaseDataProvider):
             raise ProviderError(f"no RPC URL configured for {chain} (set RUGSCAN_{chain.upper()}_RPC_URL)")
         try:
             from web3 import Web3
+            from web3.middleware import ExtraDataToPOAMiddleware
         except ImportError as exc:  # pragma: no cover - optional extra
             raise ProviderError("web3 is not installed; install with `pip install .[live]`") from exc
         w3 = Web3(Web3.HTTPProvider(url, request_kwargs={"timeout": self.settings.rpc_timeout_s}))
+        # BSC (and other Clique/Parlia chains) put validator signatures in extraData; without this
+        # middleware web3 rejects every block header, so block timestamps silently fell back to "now".
+        w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
         return Web3EvmClient(w3, chain_id=self.registry.get(chain).chain_id)
 
     def _default_explorer(self, chain: Chain) -> Explorer | None:
