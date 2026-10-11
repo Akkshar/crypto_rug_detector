@@ -1,4 +1,8 @@
 import { useEffect, useRef } from "react";
+import { geoEquirectangular, geoPath } from "d3-geo";
+import { feature } from "topojson-client";
+import type { GeometryCollection, Topology } from "topojson-specification";
+import landTopo from "world-atlas/land-110m.json";
 
 export interface GlobeArc {
   lat1: number;
@@ -45,114 +49,58 @@ export const DEFAULT_ARCS: GlobeArc[] = [
   { lat1: -23.55, lon1: -46.63, lat2: 6.52, lon2: 3.38, label1: "São Paulo", label2: "Lagos" },
 ];
 
+// Spacing between dots in degrees. Lower = denser dots and sharper coastlines.
+const DOT_SPACING_DEG = 1.8;
+
+const landTopology = landTopo as unknown as Topology<{ land: GeometryCollection }>;
+const LAND = feature(landTopology, landTopology.objects.land);
+
+let cachedLandDots: Array<[number, number]> | null = null;
+
 /**
- * High-accuracy real-world landmass test function
- * Returns true if the coordinate is on land (Africa, Americas, Europe, Asia, Australia, Antarctica)
+ * Builds the list of [lat, lon] dot positions that sit on real land.
+ * Land is rasterised once onto an offscreen equirectangular canvas from
+ * Natural Earth coastlines, then each grid point is a cheap pixel lookup.
  */
-function isEarthLand(lat: number, lon: number): boolean {
-  // Antarctica
-  if (lat < -62) return true;
+function getLandDots(): Array<[number, number]> {
+  if (cachedLandDots) return cachedLandDots;
 
-  // Australia & New Zealand
-  if (lat >= -39 && lat <= -11 && lon >= 113 && lon <= 154) {
-    if (lat > -19 && lon > 135 && lon < 142) return false; // Gulf of Carpentaria
-    return true;
-  }
-  if (lat >= -47 && lat <= -34 && lon >= 166 && lon <= 178) return true; // New Zealand
+  const MW = 1440;
+  const MH = 720;
+  const mask = document.createElement("canvas");
+  mask.width = MW;
+  mask.height = MH;
+  const mctx = mask.getContext("2d", { willReadFrequently: true });
+  if (!mctx) return [];
 
-  // Africa
-  if (lat >= -35 && lat <= 37 && lon >= -18 && lon <= 52) {
-    // Exclude Atlantic/Indian ocean borders
-    if (lat < 5 && lon < 8) return false; // Gulf of Guinea
-    if (lat < -10 && lon > 41) return false;
-    if (lat > 32 && lon > 32 && lon < 36) return false; // Eastern Med
-    if (lat > 12 && lat < 30 && lon > 32 && lon < 44) return false; // Red Sea
-    return true;
-  }
-  // Madagascar
-  if (lat >= -26 && lat <= -12 && lon >= 43 && lon <= 51) return true;
+  const projection = geoEquirectangular()
+    .scale(MW / (2 * Math.PI))
+    .translate([MW / 2, MH / 2]);
+  mctx.fillStyle = "#fff";
+  mctx.beginPath();
+  geoPath(projection, mctx)(LAND);
+  mctx.fill();
+  const px = mctx.getImageData(0, 0, MW, MH).data;
 
-  // South America
-  if (lat >= -56 && lat <= 13 && lon >= -82 && lon <= -34) {
-    if (lat > 5 && lon > -50) return false;
-    if (lat < -20 && lon > -53) return false; // South Atlantic
-    if (lat < -40 && lon > -60) return false;
-    if (lat > 0 && lon < -78) return false;
-    return true;
-  }
+  const isLand = (lat: number, lon: number) => {
+    const x = Math.min(MW - 1, Math.floor(((lon + 180) / 360) * MW));
+    const y = Math.min(MH - 1, Math.floor(((90 - lat) / 180) * MH));
+    return px[(y * MW + x) * 4 + 3] > 127;
+  };
 
-  // North America
-  if (lat >= 7 && lat <= 83 && lon >= -168 && lon <= -52) {
-    // Mexico & Central America
-    if (lat < 30 && (lon < -116 || lon > -76)) return false;
-    // Gulf of Mexico
-    if (lat >= 19 && lat <= 30 && lon >= -97 && lon <= -82) return false;
-    // Hudson Bay
-    if (lat >= 51 && lat <= 65 && lon >= -95 && lon <= -77) return false;
-    // Greenland
-    if (lat >= 60 && lon >= -55 && lon <= -18) return true;
-    if (lat > 50) return true;
-    if (lat >= 25 && lon >= -125 && lon <= -67) return true; // USA
-    if (lat >= 14 && lat < 25 && lon >= -106 && lon <= -86) return true; // Mexico
-    if (lat >= 7 && lat < 14 && lon >= -86 && lon <= -77) return true; // Central America
-  }
-
-  // Europe
-  if (lat >= 36 && lat <= 71 && lon >= -11 && lon <= 40) {
-    // Mediterranean sea
-    if (lat >= 33 && lat <= 41 && lon >= -3 && lon <= 24) {
-      if (lat >= 36 && lat <= 44 && lon >= -9 && lon <= 3) return true; // Spain
-      if (lat >= 37 && lat <= 46 && lon >= 8 && lon <= 19) return true; // Italy
-      if (lat >= 36 && lat <= 41 && lon >= 20 && lon <= 26) return true; // Greece
-      return false;
-    }
-    // Baltic sea
-    if (lat >= 54 && lat <= 65 && lon >= 14 && lon <= 24) return false;
-    // Black sea
-    if (lat >= 41 && lat <= 47 && lon >= 28 && lon <= 42) return false;
-    // UK & Ireland
-    if (lat >= 50 && lat <= 59 && lon >= -11 && lon <= 2) return true;
-    // Scandinavia
-    if (lat >= 55 && lat <= 71 && lon >= 4 && lon <= 32) return true;
-    // Mainland Europe
-    if (lat >= 43 && lat <= 56 && lon >= -5 && lon <= 35) return true;
-  }
-
-  // Asia
-  if (lat >= 1 && lat <= 77 && lon >= 34 && lon <= 180) {
-    // Arabian peninsula
-    if (lat >= 12 && lat <= 33 && lon >= 34 && lon <= 60) {
-      if (lat > 22 && lon < 37) return false;
-      return true;
-    }
-    // Indian subcontinent
-    if (lat >= 7 && lat <= 36 && lon >= 68 && lon <= 92) {
-      // Indian Ocean tapers south
-      if (lat < 22 && (lon < 72 || lon > 87)) {
-        if (lat >= 6 && lat <= 10 && lon >= 79 && lon <= 82) return true; // Sri Lanka
-        return false;
-      }
-      return true;
-    }
-    // Southeast Asia & Indochina
-    if (lat >= 1 && lat <= 24 && lon >= 95 && lon <= 110) return true;
-    // Indonesia & Malaysia
-    if (lat >= -11 && lat <= 7 && lon >= 95 && lon <= 141) return true;
-    // Philippines
-    if (lat >= 5 && lat <= 19 && lon >= 118 && lon <= 127) return true;
-    // Japan
-    if (lat >= 30 && lat <= 46 && lon >= 128 && lon <= 146) return true;
-    // Korea
-    if (lat >= 34 && lat <= 43 && lon >= 124 && lon <= 130) return true;
-    // China, Central Asia, Russia / Siberia
-    if (lat >= 20 && lat <= 77 && lon >= 60 && lon <= 180) {
-      // Exclude Sea of Okhotsk
-      if (lat >= 50 && lat <= 60 && lon >= 145 && lon <= 156) return false;
-      return true;
+  const out: Array<[number, number]> = [];
+  for (let lat = -84; lat <= 84; lat += DOT_SPACING_DEG) {
+    const cosLat = Math.cos((lat * Math.PI) / 180);
+    const count = Math.max(1, Math.round((360 / DOT_SPACING_DEG) * cosLat));
+    const lonStep = 360 / count;
+    for (let k = 0; k < count; k++) {
+      const lon = -180 + k * lonStep;
+      if (isLand(lat, lon)) out.push([lat, lon]);
     }
   }
 
-  return false;
+  cachedLandDots = out;
+  return out;
 }
 
 export function Globe({
@@ -189,7 +137,6 @@ export function Globe({
     const colPri2 = rootStyle.getPropertyValue("--pri2").trim() || "#7a4dff";
     const colMut = rootStyle.getPropertyValue("--mut").trim() || "#8f97c9";
     const colTx = rootStyle.getPropertyValue("--tx").trim() || "#eef0ff";
-    const colBg = rootStyle.getPropertyValue("--bg").trim() || "#070a1f";
     const colPanel = rootStyle.getPropertyValue("--panel").trim() || "#0d1230";
 
     const W = size;
@@ -224,29 +171,10 @@ export function Globe({
       ];
     };
 
-    // Generate high-density realistic dot grid
-    interface Dot {
-      vec: [number, number, number];
-      isLand: boolean;
-    }
-    const dots: Dot[] = [];
-
-    // Dense latitude slices with cosine compensation
-    const latStep = 2.4;
-    for (let lat = -84; lat <= 84; lat += latStep) {
-      const cosLat = Math.cos((lat * Math.PI) / 180);
-      const count = Math.max(1, Math.round(150 * cosLat));
-      const lonStep = 360 / count;
-      for (let k = 0; k < count; k++) {
-        const lon = -180 + k * lonStep;
-        const land = isEarthLand(lat, lon);
-        // Only keep land dots + sparse ocean graticule dots to ensure crisp continents
-        dots.push({
-          vec: latLonToVec(lat, lon),
-          isLand: land,
-        });
-      }
-    }
+    // Land dots from real coastline data (computed once, then cached)
+    const dots: Array<[number, number, number]> = getLandDots().map(([lat, lon]) =>
+      latLonToVec(lat, lon),
+    );
 
     // Great circle arcs with SLERP interpolation
     interface ArcTrack {
@@ -377,7 +305,7 @@ export function Globe({
       }
 
       // --- 2. Realistic Ocean Sphere Body ---
-      // Subtle gradient from --panel (#0d1230) to --bg (#070a1f) with sun specular highlight
+      // Subtle gradient that stays at --panel at the edge (no dark limb ring)
       const oceanGrad = ctx.createRadialGradient(
         cx - R * 0.38,
         cy - R * 0.36,
@@ -388,7 +316,7 @@ export function Globe({
       );
       oceanGrad.addColorStop(0, "rgba(18, 24, 67, 0.96)"); // Lit ocean side
       oceanGrad.addColorStop(0.65, colPanel);
-      oceanGrad.addColorStop(1, colBg); // Deep space terminator
+      oceanGrad.addColorStop(1, colPanel);
       ctx.fillStyle = oceanGrad;
       ctx.beginPath();
       ctx.arc(cx, cy, R, 0, Math.PI * 2);
@@ -420,10 +348,7 @@ export function Globe({
 
       // --- 3. Dotted Continents Rendering with Realistic Terminator Lighting ---
       for (let i = 0; i < dots.length; i++) {
-        const dot = dots[i];
-        if (!dot.isLand) continue; // High-density land dots produce clear continents
-
-        const p = transformPoint(dot.vec, yaw);
+        const p = transformPoint(dots[i], yaw);
 
         // Discard or hide dots on the back-facing hemisphere (P.z < -0.05)
         if (p[2] < -0.05) continue;
