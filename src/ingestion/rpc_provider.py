@@ -143,6 +143,19 @@ class RPCDataProvider(BaseDataProvider):
         tx = self._client(chain).get_transaction(creation[1])
         return tx.block_number if tx else None
 
+    def first_pool_block(self, chain: Chain, address: str) -> int | None:
+        """Block in which the token's earliest DEX pool was created – the moment a launch monitor would
+        first see it. ``None`` when no pool exists on any configured DEX (needs the explorer)."""
+        chain = Chain(chain)
+        client = self._client(chain)
+        discovery = PoolDiscovery(client, self.registry.get(chain), self.registry, replay_lookback=self.replay_lookback)
+        blocks = [
+            b
+            for *_, pool in discovery.find_pools(to_checksum_address(address))
+            if (b := self.creation_block(chain, pool))
+        ]
+        return min(blocks) if blocks else None
+
     # ------------------------------------------------------------------ #
     async def fetch_snapshot(self, chain: Chain, address: str, *, block: int | None = None) -> TokenSnapshot:
         return await asyncio.to_thread(self.fetch_sync, chain, address, block)

@@ -298,3 +298,17 @@ def test_default_client_tolerates_poa_extra_data():
     client = RPCDataProvider(settings, registry=REG)._default_client(Chain.BSC)
     client.w3.provider = ParliaProvider()
     assert client.block_timestamp(1) == datetime.fromtimestamp(0x5F5E100, tz=timezone.utc)
+
+
+def test_first_pool_block_is_the_earliest_pool_creation(chain, explorer):
+    """--at-pool pins snapshots to the first DEX pool's creation block, not the token's."""
+    from src.ingestion.evm.client import TxInfo
+
+    explorer.creations[PAIR] = (DEPLOYER, "0x" + "05" * 32)
+    chain.transactions["0x" + "05" * 32] = TxInfo("0x" + "05" * 32, DEPLOYER, UNI_V2, 0, 10)
+    provider = make_provider(chain, explorer)
+    assert provider.first_pool_block(Chain.ETHEREUM, TOKEN) == 10
+
+    explorer.creations.pop(PAIR)
+    assert provider.first_pool_block(Chain.ETHEREUM, TOKEN) is None  # pool exists but creation unknown
+    assert provider.first_pool_block(Chain.ETHEREUM, HOLDER_A) is None  # not a token: no pool anywhere

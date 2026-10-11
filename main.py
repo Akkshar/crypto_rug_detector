@@ -423,7 +423,11 @@ def import_corpus(
     fixtures: Annotated[Path | None, typer.Option(help="Fixture directory for the mock provider")] = None,
     cache: Annotated[Path | None, typer.Option(help="SQLite cache to fill (or RUGSCAN_CACHE_PATH)")] = None,
     at_launch: Annotated[bool, typer.Option(help="Snapshot each token shortly after creation (live provider)")] = False,
-    launch_offset: Annotated[int, typer.Option(help="Blocks after creation when --at-launch")] = 1_000,
+    at_pool: Annotated[
+        bool,
+        typer.Option(help="Snapshot each token shortly after its first DEX pool was created; skip tokens without one"),
+    ] = False,
+    launch_offset: Annotated[int, typer.Option(help="Blocks after creation / pool creation when pinning")] = 1_000,
     resume: Annotated[bool, typer.Option(help="Skip rows that already have a snapshot in the cache")] = False,
     only_chain: Annotated[Chain | None, typer.Option(help="Import only rows for this chain")] = None,
     quiet: Annotated[bool, typer.Option("--quiet", "-q")] = True,
@@ -441,7 +445,7 @@ def import_corpus(
         err.print("[bold red]error:[/bold red] no cache given; pass --cache or set RUGSCAN_CACHE_PATH")
         raise typer.Exit(code=2)
 
-    ok = failed = skipped = 0
+    ok = failed = skipped = no_pool = 0
     try:
         with csv_path.open(encoding="utf-8", newline="") as fh:
             for row in csv.DictReader(fh):
@@ -463,11 +467,18 @@ def import_corpus(
                         provider, address, chain, fixtures, store, None
                     )
                     block = int(row["block"]) if row.get("block") else None
-                    if block is None and at_launch:
+                    if block is None and (at_launch or at_pool):
                         inner = data_provider.inner if isinstance(data_provider, CachingProvider) else data_provider
                         if isinstance(inner, RPCDataProvider):
-                            created = inner.creation_block(resolved_chain, target)
-                            block = created + launch_offset if created is not None else None
+                            if at_pool:
+                                anchor = inner.first_pool_block(resolved_chain, target)
+                                if anchor is None:
+                                    err.print(f"[dim]skip {address}: no DEX pool on any configured factory[/dim]")
+                                    no_pool += 1
+                                    continue
+                            else:
+                                anchor = inner.creation_block(resolved_chain, target)
+                            block = anchor + launch_offset if anchor is not None else None
                     snapshot = asyncio.run(data_provider.fetch_snapshot(resolved_chain, target, block=block))
                     store.put_snapshot(snapshot, data_provider.name, label=label.lower())
                     ok += 1
@@ -481,7 +492,11 @@ def import_corpus(
                     failed += 1
     finally:
         store.close()
-    out.print(f"imported {ok} snapshot(s), {failed} failed" + (f", {skipped} already cached" if skipped else ""))
+    out.print(
+        f"imported {ok} snapshot(s), {failed} failed"
+        + (f", {skipped} already cached" if skipped else "")
+        + (f", {no_pool} without a DEX pool (skipped)" if no_pool else "")
+    )
     if ok == 0 and skipped == 0:
         raise typer.Exit(code=1)
 

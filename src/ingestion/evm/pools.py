@@ -100,14 +100,12 @@ class PoolDiscovery:
     # ------------------------------------------------------------------ #
     # discovery
     # ------------------------------------------------------------------ #
-    def discover(
-        self, token: str, *, deployer: str | None, owner: str | None, now: datetime | None = None
-    ) -> list[LiquidityPool]:
-        """Three batched round-trips: factory lookups → pool state → (v2 only) LP-holder log replay."""
-        token = to_checksum_address(token)
-        native = self.native_price()
+    def find_pools(self, token: str) -> list[tuple[str, DexKind, str, int | None, str]]:
+        """One batched round-trip: ask every configured factory about every quote asset.
 
-        # Round 1: ask every factory about every quote asset at once.
+        Returns ``(dex_name, kind, quote_symbol, fee_tier, pool_address)`` for each pool that exists.
+        """
+        token = to_checksum_address(token)
         probes: list[tuple[str, DexKind, str, int | None, abi.Call]] = []
         for dex_name, dex in self.cfg.dexes.items():
             for qsym, quote in self.cfg.quote_tokens.items():
@@ -133,6 +131,16 @@ class PoolDiscovery:
                 continue
             if pool != ZERO_ADDRESS:
                 found.append((dex_name, kind, qsym, fee, pool))
+        return found
+
+    def discover(
+        self, token: str, *, deployer: str | None, owner: str | None, now: datetime | None = None
+    ) -> list[LiquidityPool]:
+        """Three batched round-trips: factory lookups → pool state → (v2 only) LP-holder log replay."""
+        token = to_checksum_address(token)
+        native = self.native_price()
+
+        found = self.find_pools(token)
         if not found:
             return []
 
