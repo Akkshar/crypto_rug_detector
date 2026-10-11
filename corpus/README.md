@@ -16,13 +16,35 @@ notes on where labels can come from.
 | `block` | optional – observe the token *as of* this block (archive node needed) |
 
 ```bash
-python main.py import-corpus corpus/seed_corpus.csv -p rpc --cache reports/corpus.db --at-launch
+python main.py import-corpus corpus/eval_sample.csv -p rpc --cache reports/corpus.db --at-launch
 ```
 
 `--at-launch` pins each snapshot ~1000 blocks after contract creation when no
 `block` is given. **This matters:** a known rug scanned *today* shows drained
 liquidity and is trivially detectable; the question the evaluation must answer
 is whether the token looked risky *before* it rugged.
+
+## Ready-made corpus files
+
+Built by `python corpus/build_corpus.py` (re-run to refresh; downloads are cached in `corpus/.raw/`):
+
+| file | rows | label source |
+|---|---|---|
+| `rugs_sok2024.csv` | 2,390 rugs (ETH 2,290 / BSC ~90) | SoK rug-pull dataset, Sun et al. 2024 (arXiv:2403.16082, github.com/dianxiang-sun/rug_pull_dataset). Every row keeps the reporting firm, the report URL, the taxonomy type and root cause. |
+| `benign_coingecko.csv` | ~540 benign | CoinGecko market-cap ranks 1–1000 with a native Ethereum/BSC contract, excluding wrapped/bridged/stable/staked assets. "Still has a market today" is the benign evidence. |
+| `eval_sample.csv` | ~435 (275 rug / 160 benign) | Deterministic subset for a live `--at-launch` import: all BSC rugs, ETH rugs capped at 30 per root cause (83 % of the SoK set is one mechanism, sale restriction), benign tokens ranked ≥ 100. |
+
+```bash
+python main.py import-corpus corpus/eval_sample.csv -p rpc --cache reports/corpus.db --at-launch
+python main.py backtest --cache reports/corpus.db
+python main.py train --cache reports/corpus.db --compare
+```
+
+Caveats to state in any write-up: the rug set is biased towards contract-level traps (the two
+largest sources are honeypot/trapdoor studies), so liquidity-pull-only rugs are under-represented;
+the benign set is survivorship-selected and skews older and larger than a typical fresh launch, so
+some separation comes from maturity rather than from the mechanisms the detector targets. Snapshot
+both classes at launch (`--at-launch`) so that at least the observation conditions match.
 
 ## Where labels come from
 
