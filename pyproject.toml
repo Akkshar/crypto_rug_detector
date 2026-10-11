@@ -20,6 +20,7 @@ dependencies = [
     "rich>=13.7",
     "eth-utils>=4.1",
     "eth-abi>=5.1",
+    "uvicorn>=0.54.0",
 ]
 
 [project.optional-dependencies]
