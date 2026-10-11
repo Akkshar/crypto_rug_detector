@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,9 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 settings_module.Settings.model_config["env_file"] = None
 for _name in [n for n in os.environ if n.startswith("RUGSCAN_")]:
     os.environ.pop(_name)
+# Likewise, models trained on a real corpus are persisted to .rugscan/models and would replace the
+# synthetic model the fixture assertions are written against – point the cache at a throwaway dir.
+os.environ["RUGSCAN_MODEL_CACHE_DIR"] = tempfile.mkdtemp(prefix="rugscan-test-models-")
 settings_module.get_settings.cache_clear()
 FIXTURE_NAMES = ("sample_benign_token", "sample_honeypot", "sample_unlocked_rug")
 
