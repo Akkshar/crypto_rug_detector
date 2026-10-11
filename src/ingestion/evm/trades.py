@@ -4,8 +4,8 @@
 uint amount1Out, address indexed to)`` tells us direction and size but not who
 traded: ``sender`` is the router and ``to`` is the router again when the
 output is unwrapped to native. The trader is therefore resolved from the
-transaction's ``from`` field, capped so a busy pair can't trigger thousands of
-``eth_getTransactionByHash`` calls.
+transaction's ``from`` field - fetched in JSON-RPC batches, and capped so a
+busy pair can't trigger thousands of ``eth_getTransactionByHash`` calls.
 """
 
 from __future__ import annotations
@@ -60,19 +60,20 @@ def analyse_swaps(
     pair = to_checksum_address(pair)
     hi = to_block if to_block is not None else client.block_number()
     swaps: list[SwapRecord] = []
-    tx_cache: dict[str, str | None] = {}
-    lookups = 0
     truncated = False
     topic = V3_SWAP_TOPIC if kind == "v3" else SWAP_TOPIC
 
     entries, served_from = client.get_logs_window(pair, [topic], from_block, hi, chunk=log_chunk)
     if served_from is not None and served_from > from_block:
         from_block = served_from  # report the window that was actually observable
+
+    # Pass 1: decode direction/size and collect the distinct transactions we are allowed to look up.
+    decoded: list[tuple[int, str, bool, int]] = []
     for entry in entries:
         if kind == "v3":
             if len(entry.data) < 64:
                 continue
-            # v3: signed deltas from the pool's view – positive = paid in, negative = paid out.
+            # v3: signed deltas from the pool's view - positive = paid in, negative = paid out.
             amount0, amount1 = _signed(entry.data, 0), _signed(entry.data, 1)
             token_delta = amount0 if token_is_token0 else amount1
             quote_delta = amount1 if token_is_token0 else amount0
@@ -88,22 +89,24 @@ def analyse_swaps(
             quote_out = a1_out if token_is_token0 else a0_out
             is_buy = token_out > 0
             quote_amount = quote_in if is_buy else quote_out
-
-        trader: str | None
-        if entry.tx_hash in tx_cache:
-            trader = tx_cache[entry.tx_hash]
-        elif lookups < max_tx_lookups:
-            lookups += 1
-            tx = client.get_transaction(entry.tx_hash)
-            trader = tx.sender if tx else None
-            tx_cache[entry.tx_hash] = trader
-        else:
-            trader = None
-            truncated = True
-        swaps.append(SwapRecord(entry.block_number, entry.tx_hash, trader, is_buy, quote_amount))
-        if len(swaps) >= max_swaps:
+        decoded.append((entry.block_number, entry.tx_hash, is_buy, quote_amount))
+        if len(decoded) >= max_swaps:
             truncated = True
             break
+
+    wanted = list(dict.fromkeys(tx_hash for _, tx_hash, _, _ in decoded))
+    if len(wanted) > max_tx_lookups:
+        truncated = True
+        wanted = wanted[:max_tx_lookups]
+    lookups = len(wanted)
+
+    # Pass 2: one batched round trip for the trader identities instead of one call per swap.
+    senders: dict[str, str | None] = {}
+    if wanted:
+        for tx_hash, tx in client.get_transactions(wanted).items():
+            senders[tx_hash] = tx.sender if tx else None
+    for block, tx_hash, is_buy, quote_amount in decoded:
+        swaps.append(SwapRecord(block, tx_hash, senders.get(tx_hash), is_buy, quote_amount))
 
     scale = 10**quote_decimals
     buys = [s for s in swaps if s.is_buy]

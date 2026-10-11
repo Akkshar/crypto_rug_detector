@@ -102,3 +102,38 @@ def test_seed_corpus_template_imports(tmp_path: Path):
     result = CliRunner().invoke(app, ["import-corpus", "corpus/seed_corpus.csv", "--cache", str(db)])
     assert result.exit_code == 0, result.output
     assert "imported 3 snapshot(s), 0 failed" in result.stdout
+
+
+def test_published_corpus_files_are_well_formed():
+    """The real corpus (SoK rugs + CoinGecko survivors) must stay importable: valid chain/address/label per row."""
+    import csv
+    import re
+
+    address = re.compile(r"^0x[0-9a-fA-F]{40}$")
+    expected = {"rugs_sok2024.csv": {"rug"}, "benign_coingecko.csv": {"benign"}, "eval_sample.csv": {"rug", "benign"}}
+    for name, labels in expected.items():
+        rows = list(csv.DictReader((Path("corpus") / name).open(encoding="utf-8")))
+        assert len(rows) >= 100, name
+        assert {r["label"] for r in rows} == labels, name
+        assert all(Chain(r["chain"]) and address.match(r["address"]) and r["source"] for r in rows), name
+        assert len({r["address"].lower() for r in rows}) == len(rows), f"{name}: duplicate addresses"
+
+
+def test_import_corpus_resume_and_chain_filter(tmp_path: Path):
+    from typer.testing import CliRunner
+
+    from main import app
+
+    db = tmp_path / "c.db"
+    first = CliRunner().invoke(
+        app, ["import-corpus", "corpus/seed_corpus.csv", "--cache", str(db), "--only-chain", "bsc"]
+    )
+    assert first.exit_code == 0, first.output
+    assert "imported 1 snapshot(s), 0 failed" in first.stdout
+
+    again = CliRunner().invoke(app, ["import-corpus", "corpus/seed_corpus.csv", "--cache", str(db), "--resume"])
+    assert again.exit_code == 0, again.output
+    assert "imported 2 snapshot(s), 0 failed, 1 already cached" in again.stdout
+
+    nothing_new = CliRunner().invoke(app, ["import-corpus", "corpus/seed_corpus.csv", "--cache", str(db), "--resume"])
+    assert nothing_new.exit_code == 0 and "imported 0 snapshot(s), 0 failed, 3 already cached" in nothing_new.stdout

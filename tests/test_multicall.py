@@ -256,3 +256,111 @@ def test_fake_client_block_pinning_clamps_logs():
     assert [e.block_number for e in pinned.get_logs(TOKEN, [None], 0, "latest")] == [10, 50]
     assert pinned.block_number() == 50 and fake.block_number() == 100
     assert pinned.responses is fake.responses  # programmed state is shared, only the pin differs
+
+
+# --------------------------------------------------------------------------- #
+# JSON-RPC batched eth_getTransactionByHash
+# --------------------------------------------------------------------------- #
+
+
+class BatchingEth(StubEth):
+    """``w3.eth`` whose ``get_transaction`` is recorded, plus a ``batch_requests`` on the parent w3."""
+
+    def __init__(self, fake: FakeEvmClient, *, fail_batches: int = 0, missing: set[str] | None = None):
+        super().__init__(fake)
+        self.single_calls: list[str] = []
+        self.batch_calls: list[list[str]] = []
+        self.fail_batches = fail_batches
+        self.missing = missing or set()
+        self._batching = False
+
+    def _raw(self, tx_hash: str) -> dict:
+        tx = self.fake.transactions[tx_hash]
+        return {"from": tx.sender, "to": tx.to, "value": tx.value, "blockNumber": tx.block_number, "input": b""}
+
+    def get_transaction(self, tx_hash: str):
+        if self._batching:
+            return ("eth_getTransactionByHash", tx_hash)  # web3 returns request info while batching
+        self.single_calls.append(tx_hash)
+        if tx_hash in self.missing:
+            raise RuntimeError("transaction not found")
+        return self._raw(tx_hash)
+
+
+class Batch:
+    def __init__(self, eth: BatchingEth):
+        self.eth = eth
+        self.items: list[str] = []
+
+    def __enter__(self):
+        self.eth._batching = True
+        return self
+
+    def __exit__(self, *exc):
+        self.eth._batching = False
+
+    def add(self, payload):
+        self.items.append(payload[1])
+
+    def execute(self):
+        self.eth.batch_calls.append(list(self.items))
+        if self.eth.fail_batches > 0:
+            self.eth.fail_batches -= 1
+            raise RuntimeError("batch request not supported")
+        if any(h in self.eth.missing for h in self.items):
+            raise RuntimeError("transaction not found")  # web3 raises for the whole batch
+        return [self.eth._raw(h) for h in self.items]
+
+
+class BatchingW3(StubW3):
+    def batch_requests(self):
+        return Batch(self.eth)
+
+
+def _txs(fake: FakeEvmClient, n: int) -> list[str]:
+    from src.ingestion.evm.client import TxInfo
+
+    hashes = []
+    for i in range(1, n + 1):
+        h = "0x" + f"{i:064x}"
+        fake.transactions[h] = TxInfo(h, to_checksum_address(f"0x{i:040x}"), OTHER, 0, 100 + i)
+        hashes.append(h)
+    return hashes
+
+
+def test_get_transactions_uses_one_batch_per_chunk():
+    fake = FakeEvmClient()
+    eth = BatchingEth(fake)
+    client = Web3EvmClient(BatchingW3(eth), chain_id=1)
+    client.TX_BATCH = 4
+    hashes = _txs(fake, 10)
+
+    out = client.get_transactions(hashes + hashes[:2])  # duplicates collapse
+    assert [tx.sender for tx in out.values() if tx] == [fake.transactions[h].sender for h in hashes]
+    assert [len(b) for b in eth.batch_calls] == [4, 4, 2]
+    assert eth.single_calls == []
+
+
+def test_get_transactions_falls_back_per_hash_when_a_batch_fails():
+    fake = FakeEvmClient()
+    hashes = _txs(fake, 3)
+    eth = BatchingEth(fake, missing={hashes[1]})
+    client = Web3EvmClient(BatchingW3(eth), chain_id=1)
+
+    out = client.get_transactions(hashes)
+    assert out[hashes[0]] is not None and out[hashes[1]] is None and out[hashes[2]] is not None
+    assert len(eth.batch_calls) == 1 and eth.single_calls == hashes
+    assert client._batch_ok, "one pruned transaction must not disable batching"
+
+
+def test_get_transactions_disables_batching_after_repeated_failures():
+    fake = FakeEvmClient()
+    hashes = _txs(fake, 6)
+    eth = BatchingEth(fake, fail_batches=5)
+    client = Web3EvmClient(BatchingW3(eth), chain_id=1)
+    client.TX_BATCH = 2
+
+    out = client.get_transactions(hashes)
+    assert all(out[h] is not None for h in hashes)
+    assert len(eth.batch_calls) == client.TX_BATCH_FAILURES  # stopped trying after the second failure
+    assert eth.single_calls == hashes and not client._batch_ok

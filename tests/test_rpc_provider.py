@@ -271,3 +271,30 @@ def test_metadata_and_taxes_are_batched(chain):
 
 def test_abi_encoding_roundtrip():
     assert abi.decode(("uint256[]",), encode(["uint256[]"], [[1, 2]])) == ((1, 2),)
+
+
+def test_default_client_tolerates_poa_extra_data():
+    """BSC block headers carry validator signatures in extraData; without the POA middleware web3
+    rejects every header and block timestamps silently fall back to wall-clock time."""
+    from datetime import datetime
+
+    from web3.providers import BaseProvider
+
+    class ParliaProvider(BaseProvider):
+        """Answers eth_getBlockByNumber with a BSC-shaped header (280-byte extraData)."""
+
+        def make_request(self, method, params):
+            assert method == "eth_getBlockByNumber", method
+            return {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {"number": "0x1", "timestamp": "0x5f5e100", "extraData": "0x" + "ab" * 280},
+            }
+
+        def is_connected(self, show_traceback=False):
+            return True
+
+    settings = Settings(_env_file=None, bsc_rpc_url="http://127.0.0.1:1")
+    client = RPCDataProvider(settings, registry=REG)._default_client(Chain.BSC)
+    client.w3.provider = ParliaProvider()
+    assert client.block_timestamp(1) == datetime.fromtimestamp(0x5F5E100, tz=timezone.utc)

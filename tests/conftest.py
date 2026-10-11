@@ -1,15 +1,24 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
+import config.settings as settings_module
 from config.settings import RiskConfig, load_risk_config
 from src.ingestion.mock_provider import MockDataProvider
 from src.models.risk_report import TokenSnapshot
 from src.models.scoring_engine import ScoringEngine
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+# The developer's .env (real RPC keys, a cache path) must never leak into the suite: tests that assert
+# "no RPC configured" would otherwise hit the network. Drop the env file and any RUGSCAN_* variables.
+settings_module.Settings.model_config["env_file"] = None
+for _name in [n for n in os.environ if n.startswith("RUGSCAN_")]:
+    os.environ.pop(_name)
+settings_module.get_settings.cache_clear()
 FIXTURE_NAMES = ("sample_benign_token", "sample_honeypot", "sample_unlocked_rug")
 
 
