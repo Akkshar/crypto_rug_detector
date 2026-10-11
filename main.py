@@ -424,6 +424,8 @@ def import_corpus(
     cache: Annotated[Path | None, typer.Option(help="SQLite cache to fill (or RUGSCAN_CACHE_PATH)")] = None,
     at_launch: Annotated[bool, typer.Option(help="Snapshot each token shortly after creation (live provider)")] = False,
     launch_offset: Annotated[int, typer.Option(help="Blocks after creation when --at-launch")] = 1_000,
+    resume: Annotated[bool, typer.Option(help="Skip rows that already have a snapshot in the cache")] = False,
+    only_chain: Annotated[Chain | None, typer.Option(help="Import only rows for this chain")] = None,
     quiet: Annotated[bool, typer.Option("--quiet", "-q")] = True,
 ) -> None:
     """Fetch, label and cache every token in a CSV – the raw material for `backtest`, `train` and `tune`."""
@@ -439,19 +441,24 @@ def import_corpus(
         err.print("[bold red]error:[/bold red] no cache given; pass --cache or set RUGSCAN_CACHE_PATH")
         raise typer.Exit(code=2)
 
-    ok = failed = 0
+    ok = failed = skipped = 0
     try:
         with csv_path.open(encoding="utf-8", newline="") as fh:
             for row in csv.DictReader(fh):
                 address = (row.get("address") or "").strip()
                 label = (row.get("label") or "").strip()
                 chain_name = (row.get("chain") or "ethereum").strip().lower()
+                if only_chain is not None and chain_name != only_chain.value:
+                    continue
                 if parse_label(label) is None:
                     err.print(f"[yellow]skip[/yellow] {address}: unknown label {label!r}")
                     failed += 1
                     continue
                 try:
                     chain = Chain(chain_name)
+                    if resume and store.get_latest(chain, address) is not None:
+                        skipped += 1
+                        continue
                     data_provider, resolved_chain, target = _make_provider(
                         provider, address, chain, fixtures, store, None
                     )
@@ -474,8 +481,8 @@ def import_corpus(
                     failed += 1
     finally:
         store.close()
-    out.print(f"imported {ok} snapshot(s), {failed} failed")
-    if ok == 0:
+    out.print(f"imported {ok} snapshot(s), {failed} failed" + (f", {skipped} already cached" if skipped else ""))
+    if ok == 0 and skipped == 0:
         raise typer.Exit(code=1)
 
 

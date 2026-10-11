@@ -117,3 +117,23 @@ def test_published_corpus_files_are_well_formed():
         assert {r["label"] for r in rows} == labels, name
         assert all(Chain(r["chain"]) and address.match(r["address"]) and r["source"] for r in rows), name
         assert len({r["address"].lower() for r in rows}) == len(rows), f"{name}: duplicate addresses"
+
+
+def test_import_corpus_resume_and_chain_filter(tmp_path: Path):
+    from typer.testing import CliRunner
+
+    from main import app
+
+    db = tmp_path / "c.db"
+    first = CliRunner().invoke(
+        app, ["import-corpus", "corpus/seed_corpus.csv", "--cache", str(db), "--only-chain", "bsc"]
+    )
+    assert first.exit_code == 0, first.output
+    assert "imported 1 snapshot(s), 0 failed" in first.stdout
+
+    again = CliRunner().invoke(app, ["import-corpus", "corpus/seed_corpus.csv", "--cache", str(db), "--resume"])
+    assert again.exit_code == 0, again.output
+    assert "imported 2 snapshot(s), 0 failed, 1 already cached" in again.stdout
+
+    nothing_new = CliRunner().invoke(app, ["import-corpus", "corpus/seed_corpus.csv", "--cache", str(db), "--resume"])
+    assert nothing_new.exit_code == 0 and "imported 0 snapshot(s), 0 failed, 3 already cached" in nothing_new.stdout
