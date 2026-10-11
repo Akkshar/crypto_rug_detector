@@ -196,6 +196,14 @@ class SnapshotCache:
         ).fetchall()
         return [RiskReport.model_validate_json(r["payload"]) for r in rows]
 
+    def recent_reports(self, limit: int = 50) -> list[RiskReport]:
+        """All recent reports across tokens, newest first."""
+        rows = self._conn.execute(
+            "SELECT payload FROM reports ORDER BY generated_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [RiskReport.model_validate_json(r["payload"]) for r in rows]
+
     def latest_report(self, chain: Chain | str, address: str) -> RiskReport | None:
         history = self.report_history(chain, address, limit=1)
         return history[0] if history else None

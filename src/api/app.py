@@ -132,6 +132,12 @@ def create_app(
         from_cache = isinstance(source, CachingProvider) and source.last_hit
         return ScanResponse(report=report, from_cache=from_cache, previous_score=previous)
 
+    @app.get("/history", response_model=list[RiskReport])
+    async def global_history(limit: Annotated[int, Field(ge=1, le=200)] = 50) -> list[RiskReport]:
+        if cache is None:
+            return []
+        return cache.recent_reports(limit)
+
     @app.get("/history/{chain}/{address}", response_model=list[RiskReport])
     async def history(chain: Chain, address: str, limit: Annotated[int, Field(ge=1, le=200)] = 20) -> list[RiskReport]:
         if cache is None:

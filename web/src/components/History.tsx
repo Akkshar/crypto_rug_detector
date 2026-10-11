@@ -1,38 +1,123 @@
-import type { RiskReport } from "../api";
+import { useState } from "react";
+import { colr, lvl, type HistoryTuple } from "../types";
 
-export function History({ reports }: { reports: RiskReport[] }) {
-  const ordered = [...reports].reverse(); // API returns newest first; chart oldest → newest
-  const w = 320;
-  const h = 72;
-  const pad = 6;
-  const xs = ordered.map((_, i) => pad + (i * (w - 2 * pad)) / Math.max(1, ordered.length - 1));
-  const ys = ordered.map((r) => h - pad - (r.risk_score / 100) * (h - 2 * pad));
-  const points = xs.map((x, i) => `${x},${ys[i]}`).join(" ");
+interface Props {
+  history: HistoryTuple[];
+  threshold: number;
+  onViewReport: (item: HistoryTuple) => void;
+  onToggleBookmark: (item: HistoryTuple) => void;
+  isBookmarked: (name: string) => boolean;
+}
+
+export function History({
+  history,
+  threshold,
+  onViewReport,
+  onToggleBookmark,
+  isBookmarked,
+}: Props) {
+  const [query, setQuery] = useState("");
+  const [sevFilter, setSevFilter] = useState("All");
+
+  const q = query.toLowerCase();
+  const filtered = history.filter(
+    (h) =>
+      (sevFilter === "All" || lvl(h[4]) === sevFilter) &&
+      (h[1] + h[2]).toLowerCase().includes(q),
+  );
+
   return (
-    <section className="card">
-      <h3>Scan history ({reports.length})</h3>
-      <svg viewBox={`0 0 ${w} ${h}`} className="spark" role="img" aria-label="risk score over scans">
-        <line x1={pad} x2={w - pad} y1={h - pad - 0.5 * (h - 2 * pad)} y2={h - pad - 0.5 * (h - 2 * pad)} className="spark-mid" />
-        <line x1={pad} x2={w - pad} y1={h - pad - 0.75 * (h - 2 * pad)} y2={h - pad - 0.75 * (h - 2 * pad)} className="spark-crit" />
-        <polyline points={points} fill="none" className="spark-line" />
-        {xs.map((x, i) => (
-          <circle key={i} cx={x} cy={ys[i]} r={3} className={`spark-dot ${ordered[i].risk_tier.toLowerCase()}`} />
-        ))}
-      </svg>
-      <table className="history">
-        <tbody>
-          {reports.slice(0, 8).map((r) => (
-            <tr key={r.generated_at}>
-              <td className="muted">{new Date(r.generated_at).toLocaleString()}</td>
-              <td>
-                <span className={`sev ${r.risk_tier.toLowerCase()}`}>{r.risk_tier}</span>
-              </td>
-              <td className="num">{r.risk_score.toFixed(1)}</td>
-              <td className="muted">{r.flags.length} flags</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </section>
+    <div className="view" id="v-history">
+      <section className="card">
+        <h3>
+          Scan History{" "}
+          <small style={{ color: "var(--mut)", fontWeight: 400 }}>
+            · {history.length} scans
+          </small>
+        </h3>
+        <div className="vbar">
+          <input
+            id="hq"
+            placeholder="Search token or symbol…"
+            aria-label="Search history"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <div className="tabs" style={{ margin: 0 }}>
+            {["All", "CRITICAL", "HIGH", "MEDIUM", "LOW"].map((l) => (
+              <button
+                key={l}
+                className={sevFilter === l ? "on" : ""}
+                data-hl={l}
+                onClick={() => setSevFilter(l)}
+              >
+                {l === "All" ? "All" : l[0] + l.slice(1).toLowerCase()}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="tw">
+          <table>
+            <thead>
+              <tr>
+                <th>Token</th>
+                <th>Risk</th>
+                <th>Score</th>
+                <th>Scanned</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="hbody">
+              {filtered.length > 0 ? (
+                filtered.map((h, i) => {
+                  const l = lvl(h[4]);
+                  return (
+                    <tr key={i}>
+                      <td>
+                        <b>{h[1]}</b>{" "}
+                        <span style={{ color: "var(--mut)" }}>{h[2]}</span>
+                      </td>
+                      <td>
+                        <span className={`badge ${l}`}>{l}</span>
+                      </td>
+                      <td style={{ color: colr(l) }}>
+                        {h[4]}/100
+                        {h[4] >= threshold && (
+                          <span title="At or above your alert threshold"> ⚠</span>
+                        )}
+                      </td>
+                      <td style={{ color: "var(--mut)" }}>{h[3]}</td>
+                      <td style={{ whiteSpace: "nowrap" }}>
+                        <button
+                          className="ghost sm"
+                          data-ho={i}
+                          onClick={() => onViewReport(h)}
+                        >
+                          View report
+                        </button>{" "}
+                        <button
+                          className="ghost sm"
+                          data-hb={i}
+                          aria-label="Toggle bookmark"
+                          onClick={() => onToggleBookmark(h)}
+                        >
+                          {isBookmarked(h[1]) ? "★" : "☆"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan={5} style={{ color: "var(--mut)" }}>
+                    No scans match.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
   );
 }

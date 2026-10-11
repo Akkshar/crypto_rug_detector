@@ -68,6 +68,21 @@ export interface Health {
   cache: boolean;
 }
 
+export interface CacheStats {
+  snapshots?: number;
+  tokens?: number;
+  labelled?: number;
+  reports?: number;
+  cache: boolean;
+}
+
+export interface RiskWeights {
+  flags: Record<string, number>;
+  category_caps: Record<string, number>;
+  tiers: Record<string, number>;
+  scoring: Record<string, number>;
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -99,8 +114,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ chain, address, max_age_s: maxAgeS ?? null }),
     }),
+  globalHistory: (limit = 50) => request<RiskReport[]>(`/history?limit=${limit}`),
   history: (chain: Chain, address: string, limit = 30) =>
     request<RiskReport[]>(`/history/${chain}/${address}?limit=${limit}`),
+  stats: () => request<CacheStats>("/stats"),
+  weights: () => request<RiskWeights>("/weights"),
   label: (chain: Chain, address: string, label: "rug" | "benign" | null) =>
     request<{ updated: number }>("/label", { method: "POST", body: JSON.stringify({ chain, address, label }) }),
 };

@@ -1,0 +1,1884 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <title>RugScan – AI-Powered Rug Pull Detection</title>
+    <style>
+        :root {
+            --bg: #070a1f;
+            --panel: #0d1230;
+            --panel2: #121843;
+            --line: #222a63;
+            --tx: #eef0ff;
+            --mut: #8f97c9;
+            --pri: #5b6cff;
+            --pri2: #7a4dff;
+            --crit: #ff4a5e;
+            --high: #ff7a3d;
+            --med: #ffc23d;
+            --low: #27d890;
+            box-sizing: border-box;
+            padding-top: env(safe-area-inset-top, 0px);
+            padding-bottom: env(safe-area-inset-bottom, 0px);
+            color-scheme: dark
+        }
+
+        * {
+            box-sizing: border-box
+        }
+
+        html,
+        body {
+            margin: 0
+        }
+
+        body {
+            background: radial-gradient(1200px 600px at 80% -10%, #1b1f6b55, transparent), var(--bg);
+            color: var(--tx);
+            font: 14px/1.45 "Segoe UI", system-ui, -apple-system, sans-serif;
+            min-height: 100vh
+        }
+
+        button,
+        input,
+        select {
+            font: inherit;
+            color: inherit
+        }
+
+        :focus-visible {
+            outline: 2px solid var(--pri);
+            outline-offset: 2px
+        }
+
+        .app {
+            display: grid;
+            grid-template-columns: 230px 1fr;
+            min-height: 100vh
+        }
+
+        aside {
+            background: #080c2859;
+            -webkit-backdrop-filter: blur(6px);
+            backdrop-filter: blur(6px);
+            position: relative;
+            isolation: isolate;
+            transition: box-shadow .25s;
+            border-right: 1px solid var(--line);
+            padding: 20px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 18px
+        }
+
+        .logo {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            padding: 0 6px
+        }
+
+        .logo svg {
+            width: 38px;
+            height: 38px
+        }
+
+        .logo b {
+            font-size: 20px;
+            display: block
+        }
+
+        .logo small {
+            color: var(--mut);
+            font-size: 11px
+        }
+
+        nav a {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            padding: 11px 14px;
+            border-radius: 10px;
+            color: #cfd3ff;
+            text-decoration: none;
+            cursor: pointer;
+            margin-bottom: 4px
+        }
+
+        nav a.on {
+            background: linear-gradient(90deg, var(--pri2), var(--pri));
+            color: #fff
+        }
+
+        nav a:hover:not(.on) {
+            background: #151b4a
+        }
+
+        .side-card {
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 12px;
+            background: #0b1030
+        }
+
+        .side-card h4 {
+            margin: 0 0 8px;
+            font-size: 12px;
+            color: var(--mut);
+            font-weight: 600
+        }
+
+        .ql {
+            display: block;
+            width: 100%;
+            text-align: left;
+            padding: 10px;
+            border-radius: 9px;
+            margin-bottom: 7px;
+            background: transparent;
+            border: 1px solid;
+            cursor: pointer;
+            font-size: 13px
+        }
+
+        .ql.h {
+            border-color: #ff4a5e88;
+            color: #ffb3bb;
+            background: #ff4a5e14
+        }
+
+        .ql.u {
+            border-color: #ffc23d88;
+            color: #ffe29a;
+            background: #ffc23d14
+        }
+
+        .ql.b {
+            border-color: #27d89088;
+            color: #9af0cd;
+            background: #27d89014
+        }
+
+        .api {
+            margin-top: auto;
+            font-size: 12px;
+            color: var(--mut)
+        }
+
+        .api i {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--low);
+            box-shadow: 0 0 8px var(--low);
+            margin-right: 6px
+        }
+
+        main {
+            padding: 16px 22px 30px;
+            min-width: 0
+        }
+
+        .top {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-bottom: 14px;
+            flex-wrap: wrap
+        }
+
+        .chip {
+            border: 1px solid var(--line);
+            background: #10164a;
+            border-radius: 10px;
+            padding: 7px 12px;
+            font-size: 13px
+        }
+
+        .card {
+            position: relative;
+            isolation: isolate;
+            background: linear-gradient(180deg, #12184366, #0d123066);
+            -webkit-backdrop-filter: blur(6px);
+            backdrop-filter: blur(6px);
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            padding: 18px;
+            min-width: 0;
+            transition: border-color .25s, box-shadow .25s
+        }
+
+        .card h3 {
+            margin: 0 0 12px;
+            font-size: 15px
+        }
+
+        .hero {
+            position: relative;
+            overflow: hidden;
+            margin-bottom: 16px
+        }
+
+        .hero h1 {
+            margin: 0;
+            font-size: 30px
+        }
+
+        .hero p {
+            color: var(--mut);
+            margin: 4px 0 16px
+        }
+
+        .scan {
+            display: flex;
+            gap: 10px;
+            max-width: 760px;
+            flex-wrap: wrap
+        }
+
+        .scan input {
+            flex: 1 1 280px;
+            background: #0a0f33;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 12px 14px
+        }
+
+        .scan select {
+            background: #0a0f33;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 0 12px
+        }
+
+        .btn {
+            background: linear-gradient(90deg, var(--pri), #4a7dff);
+            border: 0;
+            border-radius: 10px;
+            padding: 12px 24px;
+            font-weight: 600;
+            cursor: pointer;
+            color: #fff
+        }
+
+        .btn:disabled {
+            opacity: .6
+        }
+
+        .err {
+            color: #ffb3bb;
+            min-height: 20px;
+            margin-top: 6px;
+            font-size: 13px
+        }
+
+        .qlinks {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+            color: var(--mut)
+        }
+
+        .qlinks button {
+            border-radius: 999px;
+            padding: 5px 12px;
+            font-size: 12px;
+            border: 1px solid;
+            background: transparent;
+            cursor: pointer
+        }
+
+        .orb {
+            position: absolute;
+            right: 30px;
+            top: 50%;
+            width: 200px;
+            height: 200px;
+            margin-top: -100px;
+            pointer-events: none
+        }
+
+        .orb .g {
+            position: absolute;
+            inset: 30px;
+            border-radius: 50%;
+            background: radial-gradient(circle at 35% 30%, #9bb0ff, #3b4fe0 45%, #10156a 80%);
+            box-shadow: 0 0 60px #4a5bff99, inset 0 0 30px #fff3
+        }
+
+        .orb .r {
+            position: absolute;
+            inset: 0;
+            border: 1px solid #7a8bff88;
+            border-radius: 50%;
+            transform: rotateX(70deg) rotateZ(0);
+            animation: sp 14s linear infinite
+        }
+
+        .orb .r.b {
+            inset: 10px;
+            transform: rotateX(70deg) rotateY(30deg);
+            animation-duration: 22s;
+            border-color: #c07aff77
+        }
+
+        @keyframes sp {
+            to {
+                transform: rotateX(70deg) rotateZ(360deg)
+            }
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1.6fr 1fr;
+            gap: 16px
+        }
+
+        .col {
+            display: grid;
+            gap: 16px;
+            align-content: start;
+            min-width: 0
+        }
+
+        .summary {
+            display: grid;
+            grid-template-columns: 150px 1fr 260px;
+            gap: 18px;
+            align-items: center
+        }
+
+        .gauge {
+            position: relative;
+            width: 150px;
+            height: 150px
+        }
+
+        .gauge svg {
+            transform: rotate(-90deg)
+        }
+
+        .gauge div {
+            position: absolute;
+            inset: 0;
+            display: grid;
+            place-content: center;
+            text-align: center
+        }
+
+        .gauge b {
+            font-size: 36px;
+            line-height: 1
+        }
+
+        .gauge small {
+            color: var(--mut)
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 700;
+            border: 1px solid
+        }
+
+        .CRITICAL {
+            color: var(--crit);
+            border-color: var(--crit);
+            background: #ff4a5e1f
+        }
+
+        .HIGH {
+            color: var(--high);
+            border-color: var(--high);
+            background: #ff7a3d1f
+        }
+
+        .MEDIUM {
+            color: var(--med);
+            border-color: var(--med);
+            background: #ffc23d1f
+        }
+
+        .LOW {
+            color: var(--low);
+            border-color: var(--low);
+            background: #27d8901f
+        }
+
+        .tok {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 6px
+        }
+
+        .tok h2 {
+            margin: 0;
+            font-size: 19px
+        }
+
+        .tok h2 span {
+            color: #7f8cff;
+            font-weight: 400
+        }
+
+        .addr {
+            color: var(--mut);
+            font-size: 12px;
+            word-break: break-all
+        }
+
+        .verdict {
+            margin-top: 10px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            font-size: 13px;
+            border: 1px solid
+        }
+
+        .scores {
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 12px;
+            background: #0a0f33
+        }
+
+        .scores div {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 6px
+        }
+
+        .scores .fin {
+            border-top: 1px solid var(--line);
+            padding-top: 8px;
+            font-weight: 700;
+            font-size: 16px
+        }
+
+        .two {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px
+        }
+
+        .bar {
+            display: grid;
+            grid-template-columns: 130px 1fr 60px;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 11px;
+            font-size: 13px
+        }
+
+        .bar small {
+            display: block;
+            color: var(--mut);
+            font-size: 11px
+        }
+
+        .trk {
+            height: 9px;
+            background: #1a2158;
+            border-radius: 9px;
+            overflow: hidden
+        }
+
+        .trk i {
+            display: block;
+            height: 100%;
+            border-radius: 9px;
+            transition: width .6s
+        }
+
+        .tabs {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-bottom: 10px
+        }
+
+        .tabs button {
+            background: transparent;
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            padding: 4px 12px;
+            font-size: 12px;
+            cursor: pointer;
+            color: var(--mut)
+        }
+
+        .tabs button.on {
+            background: #1b2370;
+            color: #fff;
+            border-color: var(--pri)
+        }
+
+        .tw {
+            overflow-x: auto
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 560px;
+            font-size: 12.5px
+        }
+
+        th {
+            color: var(--mut);
+            font-weight: 500;
+            text-align: left;
+            padding: 8px;
+            border-bottom: 1px solid var(--line)
+        }
+
+        td {
+            padding: 9px 8px;
+            border-bottom: 1px solid #1a2158;
+            vertical-align: top
+        }
+
+        .donut {
+            width: 150px;
+            height: 150px;
+            border-radius: 50%;
+            display: grid;
+            place-content: center;
+            text-align: center;
+            position: relative;
+            flex: none
+        }
+
+        .donut::before {
+            content: "";
+            position: absolute;
+            inset: 22px;
+            background: #0d123099;
+            border-radius: 50%
+        }
+
+        .donut * {
+            position: relative
+        }
+
+        .donut b {
+            font-size: 24px
+        }
+
+        .lg {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            flex-wrap: wrap
+        }
+
+        .lg ul {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            flex: 1;
+            min-width: 140px
+        }
+
+        .lg li {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 6px;
+            font-size: 13px
+        }
+
+        .lg i {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px
+        }
+
+        .ind {
+            display: grid;
+            grid-template-columns: 1fr auto auto;
+            gap: 10px;
+            align-items: center;
+            padding: 9px 0;
+            border-bottom: 1px solid #1a2158
+        }
+
+        .ind small {
+            display: block;
+            color: var(--mut);
+            font-size: 11.5px
+        }
+
+        .hist {
+            display: grid;
+            grid-template-columns: 1fr auto auto;
+            gap: 10px;
+            align-items: center;
+            padding: 9px 0;
+            border-bottom: 1px solid #1a2158;
+            cursor: pointer;
+            background: none;
+            border-left: 0;
+            border-right: 0;
+            border-top: 0;
+            width: 100%;
+            text-align: left
+        }
+
+        .hist small {
+            display: block;
+            color: var(--mut);
+            font-size: 11.5px
+        }
+
+        @media(max-width:1100px) {
+            .grid {
+                grid-template-columns: 1fr
+            }
+
+            .summary {
+                grid-template-columns: 150px 1fr
+            }
+
+            .scores {
+                grid-column: 1/-1
+            }
+
+            .orb {
+                display: none
+            }
+        }
+
+        @media(max-width:760px) {
+            .app {
+                grid-template-columns: 1fr
+            }
+
+            aside {
+                flex-direction: row;
+                overflow-x: auto;
+                padding: 10px
+            }
+
+            aside .side-card,
+            aside .api,
+            .logo small {
+                display: none
+            }
+
+            nav {
+                display: flex;
+                gap: 4px
+            }
+
+            nav a {
+                white-space: nowrap
+            }
+
+            .two,
+            .summary {
+                grid-template-columns: 1fr
+            }
+
+            .bar {
+                grid-template-columns: 100px 1fr 54px
+            }
+        }
+
+        @media(prefers-reduced-motion:reduce) {
+            .orb .r {
+                animation: none
+            }
+
+            .trk i {
+                transition: none
+            }
+        }
+
+        #ld {
+            position: fixed;
+            inset: 0;
+            z-index: 50;
+            background: #000102;
+            transition: opacity .5s
+        }
+
+        #ld.off {
+            opacity: 0;
+            pointer-events: none
+        }
+
+        #ld canvas {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            display: block
+        }
+
+        .orb {
+            width: 240px;
+            height: 240px;
+            margin-top: -120px;
+            right: 20px
+        }
+
+        .orb canvas {
+            width: 100%;
+            height: 100%
+        }
+
+        .tm {
+            display: inline-block;
+            position: relative;
+            white-space: pre
+        }
+
+        .tm span {
+            display: inline-block;
+            white-space: pre
+        }
+
+        .tmw {
+            color: #9ab0ff;
+            font-weight: 700
+        }
+
+        .tok h2 .tm,
+        .tok h2 .tm span {
+            color: inherit;
+            font-weight: inherit
+        }
+
+        .summary {
+            position: relative;
+            overflow: hidden
+        }
+
+        .summary>div {
+            position: relative
+        }
+
+        .aura {
+            position: absolute;
+            left: -40px;
+            top: 50%;
+            width: 270px;
+            height: 270px;
+            margin-top: -135px;
+            pointer-events: none;
+            z-index: 0
+        }
+
+        .pc {
+            margin-bottom: 16px
+        }
+
+        .pc h3 small {
+            color: var(--mut);
+            font-weight: 400
+        }
+
+        .pcv {
+            overflow: hidden;
+            cursor: grab;
+            touch-action: pan-y;
+            padding: 4px 0;
+            -webkit-mask-image: linear-gradient(90deg, transparent, #000 5%, #000 95%, transparent);
+            mask-image: linear-gradient(90deg, transparent, #000 5%, #000 95%, transparent)
+        }
+
+        .pcv.dg {
+            cursor: grabbing
+        }
+
+        .pct {
+            display: flex;
+            gap: 14px;
+            will-change: transform;
+            width: max-content
+        }
+
+        .pcc {
+            flex: none;
+            width: 210px;
+            height: 150px;
+            position: relative;
+            overflow: hidden;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            background: linear-gradient(160deg, #151b52, #0a0f33);
+            user-select: none;
+            -webkit-user-select: none;
+            will-change: transform
+        }
+
+        .pcc:hover,
+        .pcc:focus-visible {
+            border-color: var(--pri)
+        }
+
+        .pcg {
+            position: absolute;
+            right: -4px;
+            top: -10px;
+            font: 800 96px/1 "Segoe UI", system-ui, sans-serif;
+            font-style: normal;
+            opacity: .2;
+            will-change: transform
+        }
+
+        .pcb {
+            position: absolute;
+            left: 14px;
+            right: 14px;
+            bottom: 12px;
+            display: grid;
+            gap: 4px;
+            justify-items: start
+        }
+
+        .pcb small {
+            color: var(--mut)
+        }
+
+        @media(max-width:760px) {
+            .aura {
+                top: 93px
+            }
+        }
+
+        .fs,
+        .hv {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0
+        }
+
+        .hero h1,
+        .hero p,
+        .scan,
+        .err,
+        .qlinks {
+            position: relative
+        }
+
+        .pc {
+            position: relative;
+            overflow: hidden
+        }
+
+        .pc>h3,
+        .pc>.pcv {
+            position: relative
+        }
+
+        #intro {
+            position: fixed;
+            inset: 0;
+            z-index: 40;
+            display: grid;
+            place-items: center;
+            text-align: center;
+            background: radial-gradient(900px 500px at 50% 35%, #2a2f9a55, transparent), #05071a;
+            transition: opacity .6s, transform .6s
+        }
+
+        #intro.off {
+            opacity: 0;
+            transform: scale(1.04);
+            visibility: hidden;
+            pointer-events: none;
+            transition: opacity .6s, transform .6s, visibility 0s .6s
+        }
+
+        #intro .in {
+            position: relative;
+            z-index: 1;
+            max-width: 760px;
+            padding: 24px;
+            display: grid;
+            gap: 18px;
+            justify-items: center
+        }
+
+        #intro h1 {
+            margin: 0;
+            font-size: clamp(34px, 6vw, 64px);
+            line-height: 1.1;
+            letter-spacing: -.02em
+        }
+
+        #intro p {
+            margin: 0;
+            color: var(--mut);
+            max-width: 560px;
+            font-size: 16px
+        }
+
+        .ilogo {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            font-size: 22px;
+            font-weight: 700
+        }
+
+        .ilogo svg {
+            width: 34px;
+            height: 34px
+        }
+
+        .ibtn {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            justify-content: center
+        }
+
+        .ibtn .btn {
+            padding: 14px 30px;
+            font-size: 15px;
+            box-shadow: 0 0 30px #5b6cff77
+        }
+
+        .ghost {
+            background: transparent;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 14px 24px;
+            cursor: pointer;
+            color: var(--tx);
+            font-weight: 600
+        }
+
+        .ghost:hover {
+            border-color: var(--pri)
+        }
+
+        .istats {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin-top: 8px
+        }
+
+        .istats div {
+            border: 1px solid var(--line);
+            background: #0b1030cc;
+            border-radius: 12px;
+            padding: 10px 16px;
+            display: grid
+        }
+
+        .istats b {
+            font-size: 15px
+        }
+
+        .istats span {
+            color: var(--mut);
+            font-size: 12px
+        }
+
+        .hvbg {
+            position: fixed;
+            inset: 0;
+            z-index: 0;
+            pointer-events: none
+        }
+
+        .vx {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            pointer-events: none
+        }
+
+        .app {
+            position: relative;
+            z-index: 1
+        }
+
+        .app[inert] {
+            visibility: hidden
+        }
+
+        aside::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            border-radius: inherit;
+            z-index: -1;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity .25s;
+            background: radial-gradient(320px circle at var(--mx, 50%) var(--my, 50%), rgba(122, 141, 255, .26), rgba(91, 108, 255, .08) 45%, transparent 70%)
+        }
+
+        aside:hover::before {
+            opacity: 1
+        }
+
+        .card:hover {
+            box-shadow: 0 0 30px #5b6cff33
+        }
+
+        aside:hover {
+            box-shadow: 0 0 26px #5b6cff44, inset 0 0 22px #5b6cff1a
+        }
+
+        .donut.d3 {
+            width: 190px;
+            height: 170px;
+            border-radius: 0;
+            padding-bottom: 12px
+        }
+
+        .donut.d3::before {
+            display: none
+        }
+
+        .donut.d3 b,
+        .donut.d3 small {
+            pointer-events: none
+        }
+
+        .donut.d3 b {
+            font-size: 20px
+        }
+
+        .donut.d3 small {
+            font-size: 9px;
+            max-width: 64px;
+            line-height: 1.1
+        }
+
+        #intro {
+            overflow-y: auto;
+            place-items: safe center
+        }
+
+        .itx {
+            display: grid;
+            gap: 18px;
+            justify-items: center
+        }
+
+        .ifr {
+            order: -1;
+            position: relative;
+            width: min(360px, 82vw);
+            aspect-ratio: 1
+        }
+
+        .ifr canvas {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%
+        }
+
+        @media(min-width:1180px) {
+            #intro .in {
+                max-width: 1280px;
+                width: 100%;
+                grid-template-columns: 1fr 560px;
+                gap: 48px;
+                align-items: center;
+                justify-items: stretch
+            }
+
+            .itx {
+                justify-items: start;
+                text-align: left
+            }
+
+            #intro .ibtn,
+            #intro .istats {
+                justify-content: flex-start
+            }
+
+            .ifr {
+                order: 0;
+                width: 560px
+            }
+        }
+
+        [hidden] {
+            display: none !important
+        }
+
+        .vbar {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-bottom: 12px
+        }
+
+        .vbar input,
+        .srow select {
+            background: #0a0f33;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 9px 12px
+        }
+
+        .vbar input {
+            flex: 1 1 220px
+        }
+
+        .ghost.sm {
+            padding: 5px 10px;
+            font-size: 12px;
+            border-radius: 8px
+        }
+
+        .btn.sm2 {
+            padding: 8px 16px;
+            font-size: 13px
+        }
+
+        .bmg {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+            gap: 16px
+        }
+
+        .bmc {
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            padding: 14px;
+            background: #0a0f3366
+        }
+
+        .code {
+            background: #0a0f33;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 12px;
+            overflow: auto;
+            margin: 0;
+            font: 12.5px/1.5 ui-monospace, Consolas, monospace;
+            white-space: pre;
+            max-height: 340px
+        }
+
+        code {
+            background: #0a0f33;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            padding: 1px 6px;
+            font: 12.5px ui-monospace, Consolas, monospace
+        }
+
+        .srow {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            align-items: center;
+            padding: 14px 0;
+            border-bottom: 1px solid #1a2158;
+            flex-wrap: wrap
+        }
+
+        .srow small {
+            display: block;
+            color: var(--mut)
+        }
+
+        .sw {
+            position: relative;
+            width: 42px;
+            height: 24px;
+            flex: none
+        }
+
+        .sw input {
+            opacity: 0;
+            position: absolute;
+            inset: 0;
+            cursor: pointer;
+            margin: 0
+        }
+
+        .sw i {
+            position: absolute;
+            inset: 0;
+            background: #1a2158;
+            border-radius: 99px;
+            transition: .2s;
+            pointer-events: none
+        }
+
+        .sw i::after {
+            content: "";
+            position: absolute;
+            left: 3px;
+            top: 3px;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #cfd3ff;
+            transition: .2s
+        }
+
+        .sw input:checked+i {
+            background: var(--pri)
+        }
+
+        .sw input:checked+i::after {
+            transform: translateX(18px)
+        }
+
+        #toast {
+            position: fixed;
+            left: 50%;
+            bottom: 24px;
+            transform: translate(-50%, 20px);
+            background: #151b4a;
+            border: 1px solid var(--pri);
+            border-radius: 10px;
+            padding: 10px 18px;
+            opacity: 0;
+            pointer-events: none;
+            transition: .25s;
+            z-index: 60
+        }
+
+        #toast.on {
+            opacity: 1;
+            transform: translate(-50%, 0)
+        }
+
+        .spl {
+            position: relative;
+            isolation: isolate;
+            overflow: hidden;
+            border: 0 !important
+        }
+
+        .spl-l,
+        .spl-b,
+        .spl-e {
+            position: absolute;
+            inset: 0;
+            border-radius: inherit;
+            pointer-events: none
+        }
+
+        .spl-l {
+            z-index: -1;
+            opacity: 0
+        }
+
+        .spl-b,
+        .spl-e {
+            z-index: 1;
+            padding: 1px;
+            -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+            -webkit-mask-composite: xor;
+            mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0)
+        }
+
+        .spl-b {
+            background: #2f3a95b0
+        }
+
+        .spl-e {
+            opacity: 0
+        }
+
+        .kpis {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 16px
+        }
+
+        .kpi {
+            display: grid;
+            gap: 2px;
+            padding: 16px 18px
+        }
+
+        .kpi i {
+            font-style: normal;
+            font-size: 18px;
+            color: #9ab0ff;
+            width: 36px;
+            height: 36px;
+            display: grid;
+            place-items: center;
+            border-radius: 11px;
+            background: #5b6cff22;
+            margin-bottom: 8px
+        }
+
+        .kpi b {
+            font-size: 30px;
+            line-height: 1.1;
+            font-variant-numeric: tabular-nums
+        }
+
+        .kpi span {
+            color: var(--mut);
+            font-size: 12.5px
+        }
+
+        .hero h1 {
+            background: linear-gradient(90deg, #fff, #9ab0ff 60%, #c07aff);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            letter-spacing: -.02em
+        }
+
+        @keyframes rise {
+            from {
+                opacity: 0;
+                transform: translateY(14px)
+            }
+        }
+
+        .view .card {
+            animation: rise .55s cubic-bezier(.2, .7, .2, 1) both
+        }
+
+        .kpis .card:nth-child(2) {
+            animation-delay: .06s
+        }
+
+        .kpis .card:nth-child(3) {
+            animation-delay: .12s
+        }
+
+        .kpis .card:nth-child(4) {
+            animation-delay: .18s
+        }
+
+        .pc {
+            animation-delay: .2s !important
+        }
+
+        .grid .card {
+            animation-delay: .25s
+        }
+
+        @media(max-width:1100px) {
+            .kpis {
+                grid-template-columns: repeat(2, 1fr)
+            }
+        }
+
+        @media(prefers-reduced-motion:reduce) {
+            .view .card {
+                animation: none
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="ld" role="progressbar" aria-busy="true" aria-label="Loading"><canvas></canvas></div>
+    <div id="intro" role="dialog" aria-label="Welcome to RugScan">
+        <div class="in">
+            <div class="itx">
+                <div class="ilogo"><svg viewBox="0 0 40 40" fill="none">
+                        <path d="M20 3 5 9v10c0 9 6 15 15 18 9-3 15-9 15-18V9L20 3z" stroke="#6b7bff"
+                            stroke-width="2.5" />
+                        <path d="M13 20l5 5 9-10" stroke="#9ab0ff" stroke-width="2.5" />
+                    </svg>RugScan</div>
+                <span class="chip">AI-Powered Rug Pull Detection</span>
+                <h1>Spot the <span class="tm tmw" id="itm">rug pull</span><br>before it spots you.</h1>
+                <p>Paste a token contract and get a risk score in seconds: honeypots, unlocked liquidity, hidden mints
+                    and whale concentration, explained flag by flag.</p>
+                <div class="ibtn"><button class="btn" id="ienter">Launch Scanner →</button><button class="ghost"
+                        id="isample">View sample report</button></div>
+                <div class="istats">
+                    <div><b>6</b><span>risk categories</span></div>
+                    <div><b>Rules + ML</b><span>hybrid scoring</span></div>
+                    <div><b>BSC · ETH · Base</b><span>supported chains</span></div>
+                </div>
+            </div>
+            <div class="ifr"><canvas id="globe3" role="img"
+                    aria-label="Rotating dotted globe with animated connection arcs"></canvas></div>
+        </div>
+    </div>
+    <div id="toast" role="status"></div>
+    <div class="app" inert>
+        <aside>
+            <div class="logo"><svg viewBox="0 0 40 40" fill="none">
+                    <path d="M20 3 5 9v10c0 9 6 15 15 18 9-3 15-9 15-18V9L20 3z" stroke="#6b7bff" stroke-width="2.5" />
+                    <path d="M13 20l5 5 9-10" stroke="#9ab0ff" stroke-width="2.5" />
+                </svg>
+                <div><b>RugScan</b><small>AI-Powered Rug Pull Detection</small></div>
+            </div>
+            <nav aria-label="Main"><a class="on" data-v="home">⌂ Home</a><a data-v="scan">⌕ Scan Token</a><a
+                    data-v="history">↺ Scan History</a><a data-v="bookmarks">⚑ Bookmarks</a><a data-v="api">‹/› API
+                    Docs</a><a data-v="settings">⚙ Settings</a></nav>
+            <div class="side-card">
+                <h4>Quick Links</h4><button class="ql h" data-s="honeypot">⚠ Sample Honeypot</button><button
+                    class="ql u" data-s="unlocked">◔ Sample Unlocked Rug</button><button class="ql b" data-s="benign">✓
+                    Sample Benign Token</button>
+            </div>
+            <div class="api"><i></i>API Connected<br>Backend • Mock Provider<br>AI Model: Synthetic</div>
+        </aside>
+        <main>
+            <div class="top"><span class="chip">BSC (BNB Smart Chain)</span><span class="chip">Mock Provider</span><span
+                    class="chip">Synthetic Model</span></div>
+            <div class="view" id="v-home">
+                <section class="card hero">
+                    <div class="orb" aria-hidden="true"><canvas id="shell"></canvas></div>
+                    <h1>Scan a Token</h1>
+                    <p>Detect <span class="tm tmw" id="tmw">rug pulls</span> and other risks with AI-powered analysis.
+                    </p>
+                    <div class="scan"><input id="addr" placeholder="Enter token contract address (0x…)"
+                            aria-label="Token contract address" autocomplete="off"><select aria-label="Chain">
+                            <option>BSC</option>
+                            <option>ETH</option>
+                            <option>Base</option>
+                        </select><button class="btn" id="go">Scan Token</button></div>
+                    <div class="err" id="err" role="alert"></div>
+                    <div class="qlinks">Quick Links: <button class="CRITICAL" data-s="honeypot">Sample
+                            Honeypot</button><button class="MEDIUM" data-s="unlocked">Sample Unlocked
+                            Rug</button><button class="LOW" data-s="benign">Sample Benign Token</button></div>
+                </section>
+                <div class="kpis">
+                    <section class="card kpi"><i>⌕</i><b data-kpi="scans">0</b><span>Tokens scanned</span></section>
+                    <section class="card kpi"><i style="color:#ff8a8a;background:#ff4a5e22">⚠</i><b
+                            data-kpi="flag">0</b><span>High-risk flagged</span></section>
+                    <section class="card kpi"><i>◔</i><b data-kpi="avg">0</b><span>Average risk score</span></section>
+                    <section class="card kpi"><i style="color:#7ff0c0;background:#27d89022">✓</i><b
+                            data-kpi="safe">0</b><span>Safe tokens</span></section>
+                </div>
+                <section class="card pc">
+                    <h3>Sample Scans <small>· drag to explore, click to scan</small></h3>
+                    <div class="pcv" id="pcv">
+                        <div class="pct" id="pct"></div>
+                    </div>
+                </section>
+                <div class="grid">
+                    <div class="col">
+                        <section class="card summary" id="sum"></section>
+                        <div class="two">
+                            <section class="card">
+                                <h3>Risk Breakdown <small style="color:var(--mut);font-weight:400">· points are capped
+                                        per category</small></h3>
+                                <div id="bars"></div>
+                            </section>
+                            <section class="card">
+                                <h3>Category Overview</h3>
+                                <div id="radar"></div>
+                            </section>
+                        </div>
+                        <section class="card">
+                            <div class="tabs" id="tabs"></div>
+                            <div class="tw">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Severity</th>
+                                            <th>Code</th>
+                                            <th>Description</th>
+                                            <th>Points</th>
+                                            <th>Category</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="rows"></tbody>
+                                </table>
+                            </div>
+                        </section>
+                    </div>
+                    <div class="col">
+                        <section class="card">
+                            <h3>Risk Categories</h3>
+                            <div class="lg">
+                                <div class="donut" id="donut"></div>
+                                <ul id="leg"></ul>
+                            </div>
+                        </section>
+                        <section class="card">
+                            <h3>Top Risk Indicators</h3>
+                            <div id="ind"></div>
+                        </section>
+                        <section class="card">
+                            <h3>Scan History</h3>
+                            <div id="hist"></div>
+                        </section>
+                    </div>
+                </div>
+            </div>
+            <div class="view" id="v-history" hidden></div>
+            <div class="view" id="v-bookmarks" hidden></div>
+            <div class="view" id="v-api" hidden></div>
+            <div class="view" id="v-settings" hidden></div>
+        </main>
+    </div>
+    <script>
+        const C = ["Contract Privilege", "Liquidity", "Honeypot", "Distribution", "Deployer", "Trading"], COL = ["#4b6bff", "#2fa8ff", "#ff4a5e", "#ff7a3d", "#f2f2ff", "#27d890"], CAP = [50, 50, 60, 30, 35, 30];
+        const S = {
+            honeypot: {
+                n: "SafeMoonElon2.0", s: "SME2", a: "0x2222222222222222222222222222222222222222", sc: 99.8, rule: 100, ml: .99, v: "HARD FAIL — Declared sell tax 99% ≥ 90%; honeypot: 0/10 simulated sells succeeded.", p: [50, 0, 60, 30, 23, 25],
+                f: [["CRITICAL", "HONEYPOT_SELL_BLOCKED", "0/10 simulated sells succeeded — revert: TransferHelper: TRANSFER_FROM_FAILED", 50, 2], ["CRITICAL", "SELL_TAX_EXTREME", "Declared sell tax of 99% confiscates essentially the whole trade", 40, 0], ["HIGH", "NO_SELLS_OBSERVED", "184 buys from 150 wallet(s) over blocks 43100000–43140000 with zero sells", 25, 5], ["HIGH", "UNBOUNDED_FEE_SETTER", "setSellFee(), setBuyFee() can raise taxes above 25% (potentially to 100%) after launch", 20, 0], ["HIGH", "TOP10_CONCENTRATION_HIGH", "10 wallets control 67% (excl. DEX/burn) — dump risk", 20, 3], ["MEDIUM", "DEPLOYER_FRESH_WALLET", "Deployer wallet funded 2 hours before launch", 15, 4], ["MEDIUM", "OWNER_NOT_RENOUNCED", "Owner can still change contract settings", 10, 0]]
+            },
+            unlocked: {
+                n: "MoonVault", s: "MVLT", a: "0x7a3c91f0b2d84e65aa10c3de9f2b7c48d1e05f63", sc: 71.4, rule: 68, ml: .78, v: "WARNING — Liquidity is unlocked and the owner can withdraw it at any time.", p: [22, 48, 0, 18, 14, 12],
+                f: [["HIGH", "LIQUIDITY_UNLOCKED", "100% of LP tokens held by deployer, no lock detected", 40, 1], ["HIGH", "LP_REMOVABLE_BY_OWNER", "Owner can remove liquidity without delay", 30, 1], ["MEDIUM", "MINT_FUNCTION_PRESENT", "mint() callable by owner, supply is not capped", 15, 0], ["MEDIUM", "TOP10_CONCENTRATION", "10 wallets hold 41% of supply", 18, 3], ["LOW", "DEPLOYER_PRIOR_TOKENS", "Deployer created 2 earlier tokens, both inactive", 8, 4]]
+            },
+            benign: {
+                n: "Uniswap V2", s: "UNI", a: "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984", sc: 6.1, rule: 5, ml: .04, v: "No hard-fail rules triggered. Contract, liquidity and holders look healthy.", p: [3, 0, 0, 4, 0, 0],
+                f: [["LOW", "OWNER_CAN_PAUSE", "Owner can pause transfers during emergencies", 3, 0], ["LOW", "HOLDER_CONCENTRATION_MILD", "Top 10 wallets hold 18% of supply", 4, 3]]
+            }
+        };
+        const hist = [["safe", "SafeMoonElon2.0", "(SME2)", "10/11/2026, 03:52 AM", 99.8], ["benign", "Uniswap V2", "(UNI)", "10/10/2026, 11:24 PM", 6.1], ["unlocked", "TestToken", "(TTK)", "10/10/2026, 10:17 PM", 42.3], ["unlocked", "PepeCoin", "(PEPE)", "10/09/2026, 09:42 PM", 78.6]];
+        const lvl = s => s >= 90 ? "CRITICAL" : s >= 60 ? "HIGH" : s >= 30 ? "MEDIUM" : "LOW", colr = l => ({ CRITICAL: "var(--crit)", HIGH: "var(--high)", MEDIUM: "var(--med)", LOW: "var(--low)" }[l]);
+        const $ = id => document.getElementById(id); let cur, filt = "All";
+        function show(k) {
+            const t = S[k]; cur = t; filt = "All"; const l = lvl(t.sc), tot = t.p.reduce((a, b) => a + b, 0), fl = [5, 0, 3, 2, 2, 1];
+            $("sum").innerHTML = `<div class="gauge"><svg width="150" height="150" viewBox="0 0 150 150"><circle cx="75" cy="75" r="62" fill="none" stroke="#1a2158" stroke-width="12"/><circle cx="75" cy="75" r="62" fill="none" stroke="${colr(l)}" stroke-width="12" stroke-linecap="round" stroke-dasharray="${3.9 * t.sc} 390" style="filter:drop-shadow(0 0 6px ${colr(l)})"/></svg><div><b>${t.sc}</b><small>/100</small><span class="badge ${l}">${l}</span></div></div>
+<div><div class="tok"><h2>${t.n} <span>(${t.s})</span></h2></div><div class="addr">${t.a} · BSC</div><div class="addr" style="margin-top:4px">Mock Provider · Scanned ${new Date().toLocaleString()}</div><div class="verdict ${l}">${t.v}</div></div>
+<div class="scores"><div><span>Rule Score</span><span>${t.rule.toFixed(1)}</span></div><div><span>ML Rug Prob.<br><small style="color:var(--mut)">(down-weighted: unreliable)</small></span><span>${t.ml}</span></div><div class="fin"><span>Final Score</span><span>${t.sc} /100</span></div></div>`;
+            $("bars").innerHTML = C.map((c, i) => `<div class="bar"><div>${c}<small>${fl[i]} flags</small></div><div class="trk"><i style="width:${t.p[i] / CAP[i] * 100}%;background:${t.p[i] / CAP[i] > .7 ? "var(--crit)" : t.p[i] / CAP[i] > .3 ? "var(--med)" : "var(--pri)"}"></i></div><div>${t.p[i]} / ${CAP[i]}</div></div>`).join("");
+            const pt = (i, r) => { const a = -Math.PI / 2 + i * Math.PI / 3; return [150 + r * Math.cos(a), 115 + r * Math.sin(a)] };
+            const poly = r => C.map((_, i) => pt(i, r(i)).join(",")).join(" ");
+            $("radar").innerHTML = `<svg viewBox="0 0 300 235" width="100%" role="img" aria-label="Radar of category scores">${[.33, .66, 1].map(k => `<polygon points="${poly(() => 85 * k)}" fill="none" stroke="#2a3380"/>`).join("")}${C.map((_, i) => `<line x1="150" y1="115" x2="${pt(i, 85)[0]}" y2="${pt(i, 85)[1]}" stroke="#2a3380"/>`).join("")}<polygon points="${poly(i => 85 * t.p[i] / CAP[i])}" fill="#7a4dff55" stroke="#c07aff" stroke-width="2"/>${C.map((c, i) => { const [x, y] = pt(i, 102); return `<text x="${x}" y="${y}" fill="#cfd3ff" font-size="10" text-anchor="middle">${c.split(" ")[0]} ${t.p[i]}</text>` }).join("")}</svg>`;
+            let acc = 0; $("donut").style.background = `conic-gradient(${t.p.map((v, i) => { const s = acc / (tot || 1) * 360; acc += v; return `${COL[i]} ${s}deg ${acc / (tot || 1) * 360}deg` }).join(",")})`;
+            $("donut").innerHTML = `<b>${tot}</b><small style="color:var(--mut)">Total Raw Points</small>`;
+            $("leg").innerHTML = C.map((c, i) => `<li><span><i style="background:${COL[i]}"></i>${c}</span><b>${t.p[i]}</b></li>`).join("");
+            $("ind").innerHTML = t.f.slice(0, 5).map(f => `<div class="ind"><div><b>${f[1].replace(/_/g, " ").toLowerCase().replace(/\b\w/g, m => m.toUpperCase())}</b><small>${f[2]}</small></div><span class="badge ${f[0]}">${f[0]}</span><b>+${f[3]}</b></div>`).join("");
+            tabs(); rows()
+        }
+        function tabs() { const L = ["All", "CRITICAL", "HIGH", "MEDIUM", "LOW"]; $("tabs").innerHTML = L.map(x => { const n = x == "All" ? cur.f.length : cur.f.filter(f => f[0] == x).length; return `<button class="${filt == x ? "on" : ""}" data-t="${x}">${x == "All" ? "All" : x[0] + x.slice(1).toLowerCase()} (${n})</button>` }).join("") }
+        function rows() { $("rows").innerHTML = cur.f.filter(f => filt == "All" || f[0] == filt).map(f => `<tr><td><span class="badge ${f[0]}">${f[0]}</span></td><td>${f[1]}</td><td>${f[2]}</td><td style="color:${colr(f[0])}">+${f[3]}</td><td>${C[f[4]]}</td></tr>`).join("") || `<tr><td colspan="5" style="color:var(--mut)">No findings at this severity.</td></tr>` }
+        function drawHist() { $("hist").innerHTML = hist.slice(0, 5).map((h, i) => { const l = lvl(h[4]); return `<button class="hist" data-h="${i}"><div><b>${h[1]}</b> ${h[2]}<small>${h[3]}</small></div><span class="badge ${l}">${l}</span><b>${h[4]}/100</b></button>` }).join("") }
+        document.addEventListener("click", e => {
+            const b = e.target.closest("[data-s],[data-t],[data-h]"); if (!b) return;
+            if (b.dataset.s) show(b.dataset.s); if (b.dataset.t) { filt = b.dataset.t; tabs(); rows() } if (b.dataset.h) show(hist[b.dataset.h][0] == "safe" ? "honeypot" : hist[b.dataset.h][0])
+        });
+        $("go").onclick = () => {
+            const v = $("addr").value.trim(); if (!/^0x[a-fA-F0-9]{40}$/.test(v)) { $("err").textContent = "Enter a valid contract address: 0x followed by 40 hex characters."; return }
+            $("err").textContent = ""; $("go").disabled = true; $("go").textContent = "Scanning…"; loader(1, "Scanning...");
+            setTimeout(() => { const k = ["honeypot", "unlocked", "benign"][parseInt(v.slice(-2), 16) % 3]; const t = S[k]; show(k); cur = Object.assign({}, t, { a: v }); $("sum").querySelector(".addr").textContent = v + " · BSC"; hist.unshift([k, t.n, "(" + t.s + ")", new Date().toLocaleString(), t.sc]); hist.length = Math.min(hist.length, 50); drawHist(); $("go").disabled = false; $("go").textContent = "Scan Token"; loader(0) }, 1800)
+        };
+        $("addr").addEventListener("keydown", e => { if (e.key === "Enter") $("go").click() });
+
+        /* ---- Infinity Trail loader (Originkit), ported to vanilla JS ---- */
+        const RM = matchMedia("(prefers-reduced-motion: reduce)").matches, hx = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255), mx = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t), rg = (c, a) => `rgba(${c.map(v => Math.round(v * 255))},${Math.max(0, Math.min(1, a)).toFixed(4)})`, sst = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / Math.max(1e-4, b - a))); return t * t * (3 - 2 * t) };
+        function ITrail(cv) {
+            const ctx = cv.getContext("2d"), M = 600, K = 140, SP = 128, A = { periodMs: 2610, startPct: 19, offsetY: 3, lobeRatio: 44, headWidth: 57, tailWidth: 5, taperPow: 98, fadePow: 128, coreTint: 55, coreWidth: 55, innerGlowR: 182, innerGlow: 90, haloRadius: 200, haloAlpha: 25, haloFollow: 40, lobeWash: 17, hueSoft: 73, trackOpacity: 10, sparkCount: 6, sparkMs: 150, sparkLifeMs: 1050, sparkDrift: 5, sparkSize: 4, labelOffset: 40, labelSize: 6, labelWeight: 600, labelOpacity: 60 },
+                pal = ["#6A5CFF", "#4FD6E0", "#FF0000", "#000DFF"].map(hx), WH = [.976, .992, .992], TR = hx("#5F7E9A"), size = 300, half = 150;
+            const N = 1440, k0 = A.lobeRatio / 100 / .35355339, rx = [], ry = [], cum = [0]; for (let i = 0; i <= N; i++) { const t = Math.PI / 2 - 2 * Math.PI * i / N, s = Math.sin(t), c = Math.cos(t), d = 1 + s * s; rx[i] = c / d; ry[i] = -k0 * s * c / d; if (i) cum[i] = cum[i - 1] + Math.hypot(rx[i] - rx[i - 1], ry[i] - ry[i - 1]) }
+            const px = [], py = [], nx = [], ny = []; { let i = 0; for (let j = 0; j < M; j++) { const tg = cum[N] * j / M; while (i < N - 1 && cum[i + 1] < tg) i++; const f = (tg - cum[i]) / Math.max(1e-9, cum[i + 1] - cum[i]); px[j] = rx[i] + (rx[i + 1] - rx[i]) * f; py[j] = ry[i] + (ry[i + 1] - ry[i]) * f } for (let j = 0; j < M; j++) { const a = (j - 1 + M) % M, b = (j + 1) % M, dx = px[b] - px[a], dy = py[b] - py[a], l = Math.hypot(dx, dy) || 1; nx[j] = -dy / l; ny[j] = dx / l } }
+            const plen = cum[N], PT = {}; function smp(s) { const f = (s - Math.floor(s)) * M; let j = Math.floor(f); if (j >= M) j = 0; const fr = f - j, b = (j + 1) % M; PT.x = px[j] + (px[b] - px[j]) * fr; PT.y = py[j] + (py[b] - py[j]) * fr; PT.nx = nx[j]; PT.ny = ny[j] }
+            const sprite = document.createElement("canvas"); sprite.width = sprite.height = SP; { const s = sprite.getContext("2d"), r = SP / 2, g = s.createRadialGradient(r, r, 0, r, r, r);[[0, 1], [.2, .75], [.45, .3], [.7, .08], [1, 0]].forEach(([o, a]) => g.addColorStop(o, `rgba(255,255,255,${a})`)); s.fillStyle = g; s.fillRect(0, 0, SP, SP) }
+            const tint = document.createElement("canvas"); tint.width = tint.height = SP; const tc = tint.getContext("2d"), xs = new Float32Array(K + 1), ys = new Float32Array(K + 1);
+            let sparks = [], sT = 0, clock = 0, last = -1, raf = 0, W = 0, H = 0, dpr = 1, label = "Loading...";
+            function resize() { W = cv.clientWidth; H = cv.clientHeight; dpr = Math.min(devicePixelRatio || 1, 2); cv.width = Math.max(1, Math.round(W * dpr)); cv.height = Math.max(1, Math.round(H * dpr)) }
+            function draw(dt) {
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H); const cx = W / 2, oy = H / 2 + H * A.offsetY / 100, len = .55, glow = 1, head = clock / (A.periodMs / 1e3) + A.startPct / 100;
+                let sx = 0, sw = 0, rw = 0; for (let k = 0; k <= K; k++) { const u = k / K; smp(head - u * len); xs[k] = cx + PT.x * half; ys[k] = oy + PT.y * half; const w = 1 - .5 * u; sx += PT.x * w; sw += w; if (PT.x > 0) rw += w }
+                const soft = A.hueSoft / 100, col = (() => { const tt = sst(-soft, soft, sx / Math.max(1e-4, sw)) * (pal.length - 1), i = Math.min(pal.length - 2, Math.floor(tt)); return mx(pal[i], pal[i + 1], tt - i) })(), rF = rw / Math.max(1e-4, sw), hx0 = xs[0], hy0 = ys[0], headW = size * A.headWidth / 1e3, tailW = Math.max(.3, size * A.tailWidth / 1e3);
+                ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+                { const f = A.haloFollow / 100, hcx = cx + (hx0 - cx) * f, hcy = oy + (hy0 - oy) * f, hr = size * A.haloRadius / 100, ha = A.haloAlpha / 100 * glow, g = ctx.createRadialGradient(hcx, hcy, 0, hcx, hcy, hr); g.addColorStop(0, rg(col, ha)); g.addColorStop(.35, rg(col, ha * .5)); g.addColorStop(.7, rg(col, ha * .15)); g.addColorStop(1, rg(col, 0)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H) }
+                const wash = A.lobeWash / 100 * Math.min(1.5, glow); for (let lo = 0; lo < 2; lo++) { const a = wash * (lo ? 1 - rF : rF); if (a < .003) continue; const fr = lo ? M / 2 : 0, to = lo ? M : M / 2; ctx.beginPath(); for (let j = fr; j <= to; j++) { const jj = j % M, x = cx + px[jj] * half, y = oy + py[jj] * half; j === fr ? ctx.moveTo(x, y) : ctx.lineTo(x, y) } ctx.closePath(); const lx = cx + (lo ? -.58 : .58) * half, g = ctx.createRadialGradient(lx, oy, 0, lx, oy, half * .6); g.addColorStop(0, rg(col, a)); g.addColorStop(1, rg(col, a * .35)); ctx.fillStyle = g; ctx.fill() }
+                ctx.beginPath(); for (let j = 0; j < M; j++) { const x = cx + px[j] * half, y = oy + py[j] * half; j ? ctx.lineTo(x, y) : ctx.moveTo(x, y) } ctx.closePath(); ctx.lineJoin = ctx.lineCap = "round"; const ta = A.trackOpacity / 100; ctx.lineWidth = headW * 2.2; ctx.strokeStyle = rg(TR, ta * .3); ctx.stroke(); ctx.lineWidth = headW; ctx.strokeStyle = rg(TR, ta); ctx.stroke();
+                const spacing = plen * half * len / K; tc.globalCompositeOperation = "copy"; tc.drawImage(sprite, 0, 0); tc.globalCompositeOperation = "source-in"; tc.fillStyle = rg(col, 1); tc.fillRect(0, 0, SP, SP); tc.globalCompositeOperation = "source-over"; ctx.globalCompositeOperation = "lighter";
+                for (let k = K; k >= 0; k--) { const fall = 1 - k / K, r = Math.max(1, headW * A.innerGlowR / 100 * (.4 + .6 * fall)), a = Math.min(1, A.innerGlow / 100 * glow * Math.pow(fall, 1.5) * (spacing / r) * 2.2); if (a < .002) continue; ctx.globalAlpha = a; ctx.drawImage(tint, xs[k] - r, ys[k] - r, r * 2, r * 2) }
+                ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+                const tp = A.taperPow / 100, fd = A.fadePow / 100, edge = mx(col, WH, A.coreTint / 100), cw = A.coreWidth / 100; ctx.lineCap = "butt";
+                for (let pass = 0; pass < 2; pass++) { const c = pass ? WH : edge, wm = pass ? cw : 1; for (let k = K - 1; k >= 0; k--) { const um = (k + .5) / K, a = Math.pow(1 - um, fd); if (a < .003) continue; ctx.lineWidth = (tailW + (headW - tailW) * Math.pow(1 - um, tp)) * wm; ctx.strokeStyle = rg(c, a); ctx.beginPath(); ctx.moveTo(xs[k + 1], ys[k + 1]); ctx.lineTo(xs[k], ys[k]); ctx.stroke() } }
+                ctx.fillStyle = rg(edge, 1); ctx.beginPath(); ctx.arc(hx0, hy0, headW / 2, 0, 7); ctx.fill(); ctx.fillStyle = rg(WH, 1); ctx.beginPath(); ctx.arc(hx0, hy0, headW / 2 * cw, 0, 7); ctx.fill();
+                const every = A.sparkMs / 1e3, life = A.sparkLifeMs / 1e3, dU = A.sparkDrift / 100 * 2; sT += dt; let g8 = 0; while (sT >= every && g8++ < 8) { sT -= every; if (sparks.length >= A.sparkCount) continue; smp(head - (.45 + .5 * Math.random()) * len); const sd = Math.random() < .5 ? -1 : 1, l = life * (.7 + .6 * Math.random()), v = dU / l * (.6 + .8 * Math.random()); sparks.push({ x: PT.x, y: PT.y, vx: PT.nx * sd * v, vy: PT.ny * sd * v, age: 0, life: l }) } if (sT > every) sT = 0;
+                sparks = sparks.filter(s => (s.age += dt, s.x += s.vx * dt, s.y += s.vy * dt, s.age < s.life)); ctx.globalCompositeOperation = "lighter"; const sr = Math.max(.6, size * A.sparkSize / 1e3), scl = mx(col, WH, .7); for (const s of sparks) { ctx.fillStyle = rg(scl, (1 - s.age / s.life) * .85); ctx.beginPath(); ctx.arc(cx + s.x * half, oy + s.y * half, sr, 0, 7); ctx.fill() } ctx.globalCompositeOperation = "source-over";
+                ctx.font = `${A.labelWeight} ${Math.max(6, size * A.labelSize / 100)}px Inter,system-ui,sans-serif`; ctx.textAlign = "center"; ctx.fillStyle = rg(TR, A.labelOpacity / 100); ctx.fillText(label, cx, oy + size * A.labelOffset / 100)
+            }
+            function frame(n) { raf = requestAnimationFrame(frame); const dt = last < 0 ? 0 : Math.min((n - last) / 1e3, .05); last = n; const d = dt * (RM ? .25 : 1); clock += d; draw(d) }
+            addEventListener("resize", resize);
+            return { start(l) { label = l || "Loading..."; if (!raf) { resize(); last = -1; raf = requestAnimationFrame(frame) } }, stop() { cancelAnimationFrame(raf); raf = 0 } }
+        }
+        const IT = ITrail($("ld").querySelector("canvas"));
+        function loader(on, l) { if (on) { $("ld").classList.remove("off"); IT.start(l) } else { $("ld").classList.add("off"); setTimeout(() => $("ld").classList.contains("off") && IT.stop(), 600) } }
+        IT.start(); setTimeout(() => loader(0), 2200);
+
+        /* ---- risk colour state shared by Astral Shell + Aura Blob ---- */
+        const LC = { CRITICAL: [255, 74, 94], HIGH: [255, 122, 61], MEDIUM: [255, 194, 61], LOW: [39, 216, 144] }, GL = { CRITICAL: 1, HIGH: .85, MEDIUM: .65, LOW: .5 }, SEC = [122, 77, 255]; let GT = LC.CRITICAL, GC = [91, 108, 255], GA = 1;
+        const D2 = Math.min(devicePixelRatio || 1, 2), cs = a => a.map(Math.round);
+
+        /* ---- Astral Shell: slowly turning globe of connected stars ---- */
+        (() => {
+            const cv = $("shell"), x = cv.getContext("2d"), S = 240, N = 64, P = [], E = []; cv.width = cv.height = S * D2;
+            for (let i = 0; i < N; i++) { const y = 1 - 2 * (i + .5) / N, r = Math.sqrt(1 - y * y), a = i * 2.39996; P.push([Math.cos(a) * r, y, Math.sin(a) * r]) }
+            for (let i = 0; i < N; i++)for (let j = i + 1; j < N; j++) { const d = Math.hypot(P[i][0] - P[j][0], P[i][1] - P[j][1], P[i][2] - P[j][2]); if (d < .7) E.push([i, j, d]) }
+            let t = 0; const ct = Math.cos(.35), st = Math.sin(.35); (function f() {
+                requestAnimationFrame(f); t += RM ? .0005 : .004; GC = GC.map((v, i) => v + (GT[i] - v) * .05);
+                x.setTransform(D2, 0, 0, D2, 0, 0); x.clearRect(0, 0, S, S); const cy = Math.cos(t), sy = Math.sin(t), c = cs(GC), g = x.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, 105); g.addColorStop(0, `rgba(${c},.2)`); g.addColorStop(1, `rgba(${c},0)`); x.fillStyle = g; x.fillRect(0, 0, S, S);
+                const Q = P.map(p => { const X = p[0] * cy + p[2] * sy; let Z = -p[0] * sy + p[2] * cy; const Y = p[1] * ct - Z * st; Z = p[1] * st + Z * ct; return [S / 2 + X * 92, S / 2 + Y * 92, Z] });
+                x.lineWidth = .8; E.forEach(([i, j, d]) => { const a = Q[i], b = Q[j]; x.strokeStyle = `rgba(${c},${(.08 + .45 * ((a[2] + b[2]) / 2 + 1) / 2) * (1.1 - d / .7)})`; x.beginPath(); x.moveTo(a[0], a[1]); x.lineTo(b[0], b[1]); x.stroke() });
+                Q.forEach(q => { const k = (q[2] + 1) / 2; x.fillStyle = `rgba(235,240,255,${.25 + .75 * k})`; x.beginPath(); x.arc(q[0], q[1], .8 + 1.6 * k, 0, 7); x.fill() })
+            })()
+        })();
+
+        /* ---- Aura Blob: glowing blob + shifting aura behind the risk gauge ---- */
+        const AC = document.createElement("canvas"); AC.className = "aura"; AC.setAttribute("aria-hidden", "true");
+        (() => {
+            const x = AC.getContext("2d"), S = 270; AC.width = AC.height = S * D2; let t = 0; (function f() {
+                requestAnimationFrame(f); t += RM ? 0 : .016; x.setTransform(D2, 0, 0, D2, 0, 0); x.clearRect(0, 0, S, S); x.globalCompositeOperation = "lighter";
+                [44, 60, 76, 94].forEach((R0, i) => {
+                    const c = cs(mx(GC, SEC, i / 4)), R = R0 * (.85 + .25 * GA), cx = S / 2 + Math.sin(t * .7 + i * 1.7) * 5 * i, cy = S / 2 + Math.cos(t * .6 + i * 2.1) * 5 * i, a = [.85, .5, .3, .2][i] * GA;
+                    x.beginPath(); for (let k = 0; k <= 72; k++) { const th = k / 72 * Math.PI * 2, r = R * (1 + .07 * Math.sin(3 * th + t * (1.1 + .3 * i) + i) + .05 * Math.sin(5 * th - t * .9 + i * 2)); k ? x.lineTo(cx + Math.cos(th) * r, cy + Math.sin(th) * r) : x.moveTo(cx + Math.cos(th) * r, cy + Math.sin(th) * r) }
+                    const g = x.createRadialGradient(cx, cy, 0, cx, cy, R * 1.12); g.addColorStop(0, `rgba(${c},${a})`); g.addColorStop(.55, `rgba(${c},${a * .45})`); g.addColorStop(1, `rgba(${c},0)`); x.fillStyle = g; x.fill()
+                })
+            })()
+        })();
+
+        /* ---- Text Morph: shared letters glide, others fade ---- */
+        function morph(el, a, b) {
+            el.textContent = ""; const mk = s => [...s].map(ch => { const e = document.createElement("span"); e.textContent = ch; return e }), A = mk(a), B = mk(b), lay = L => { L.forEach(s => el.appendChild(s)); const p = L.map(s => s.offsetLeft); L.forEach(s => s.remove()); return p }, ax = lay(A), bx = lay(B);
+            el.setAttribute("aria-label", b); B.forEach(s => el.appendChild(s)); if (RM) return; const used = new Set, o = { duration: 750, easing: "cubic-bezier(.7,0,.2,1)", fill: "backwards" };
+            B.forEach((s, j) => { const i = A.findIndex((q, n) => !used.has(n) && q.textContent.toLowerCase() === s.textContent.toLowerCase()); if (i >= 0) { used.add(i); s.animate([{ transform: `translateX(${ax[i] - bx[j]}px)` }, { transform: "none" }], o) } else s.animate([{ opacity: 0, transform: "translateY(.5em)" }, { opacity: 1, transform: "none" }], o) });
+            A.forEach((s, i) => { if (used.has(i)) return; s.style.cssText = `position:absolute;left:${ax[i]}px;top:0`; el.appendChild(s); s.animate([{ opacity: 1, transform: "none" }, { opacity: 0, transform: "translateY(-.5em)" }], { duration: 500, easing: "ease-in", fill: "forwards" }).onfinish = () => s.remove() })
+        }
+        { const W = ["rug pulls", "honeypots", "hidden mints", "unlocked liquidity", "sell taxes"]; let i = 0; setInterval(() => { const n = W[++i % W.length]; morph($("tmw"), W[(i - 1) % W.length], n) }, 2600) }
+        let prevN = ""; const _show = show; show = function (k) {
+            _show(k); const t = S[k], l = lvl(t.sc); GT = LC[l]; GA = GL[l]; $("sum").prepend(AC);
+            const h = $("sum").querySelector(".tok h2"), sp = h.querySelector("span"), nm = document.createElement("span"); nm.className = "tm"; h.firstChild.replaceWith(nm); h.insertBefore(document.createTextNode(" "), sp); morph(nm, prevN, t.n); prevN = t.n; mk3d(t); curK = k; spotSum(); bmBtn(t); if (curV !== "home" && curV !== "scan") view("home")
+        };
+
+        /* ---- Parallax Carousel: draggable cards, layered depth ---- */
+        (() => {
+            const v = $("pcv"), t = $("pct"), L = [["honeypot", 99.8], ["unlocked", 71.4], ["benign", 6.1], ["unlocked", 78.6, "PepeCoin", "PEPE"], ["unlocked", 42.3, "TestToken", "TTK"]];
+            t.innerHTML = L.map(d => { const s = S[d[0]], l = lvl(d[1]); return `<div class="pcc" data-k="${d[0]}" tabindex="0" role="button" aria-label="Scan ${d[2] || s.n}"><i class="pcg" style="color:${colr(l)}">${Math.round(d[1])}</i><div class="pcb"><span class="badge ${l}">${l}</span><b>${d[2] || s.n}</b><small>${d[3] || s.s} · ${s.a.slice(0, 8)}…</small></div></div>` }).join("");
+            const C = [...t.children]; let off = 0, vel = 0, dr = 0, sx = 0, so = 0, lx = 0, mv = 0; const lo = () => Math.min(0, v.clientWidth - t.scrollWidth), rub = o => o > 0 ? o * .4 : o < lo() ? lo() + (o - lo()) * .4 : o;
+            v.addEventListener("pointerdown", e => { dr = 1; mv = 0; sx = lx = e.clientX; so = off; vel = 0; v.classList.add("dg") });
+            addEventListener("pointermove", e => { if (!dr) return; const d = e.clientX - sx; if (Math.abs(d) > 5) mv = 1; vel = e.clientX - lx; lx = e.clientX; off = so + d });
+            const up = () => { dr = 0; v.classList.remove("dg") }; addEventListener("pointerup", up); addEventListener("pointercancel", up);
+            v.addEventListener("click", e => { if (mv) return; const c = e.target.closest(".pcc"); if (c) show(c.dataset.k) }); v.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.dataset.k) show(e.target.dataset.k) });
+            (function f() {
+                requestAnimationFrame(f); if (!v.clientWidth) return; if (!dr) { off += vel; vel *= .94; const l = lo(); if (off > 0) off *= .85; else if (off < l) off = l + (off - l) * .85 } const r = rub(off), w = v.clientWidth; t.style.transform = `translateX(${r}px)`;
+                C.forEach((c, i) => { const d = Math.max(-1.5, Math.min(1.5, (r + i * 224 + 105 - w / 2) / w)); c.style.transform = `scale(${1 - .05 * Math.abs(d)})`; c.querySelector(".pcg").style.transform = `translateX(${-d * 60}px)`; c.querySelector(".pcb").style.transform = `translateX(${-d * 12}px)` })
+            })()
+        })();
+
+        /* ---- Voxel Arc: curved horizon of square voxels rolling like a calm sea (intro background) ---- */
+        function VoxelArc(host) {
+            const cv = document.createElement("canvas"); cv.className = "vx"; cv.setAttribute("aria-hidden", "true"); host.prepend(cv); const x = cv.getContext("2d"), NZ = 24, VS = 34, BG = [5, 7, 26], B1 = [70, 90, 255], B2 = [79, 214, 224]; let W = 0, H = 0, t = 0, last = 0;
+            const rs = () => { W = host.clientWidth; H = host.clientHeight; cv.width = W * D2; cv.height = H * D2 }; new ResizeObserver(rs).observe(host); rs();
+            function draw() {
+                x.setTransform(D2, 0, 0, D2, 0, 0); x.clearRect(0, 0, W, H); const cx = W / 2, g = x.createRadialGradient(cx, H * .62, 0, cx, H * .62, W * .6); g.addColorStop(0, "rgba(91,108,255,.22)"); g.addColorStop(1, "rgba(91,108,255,0)"); x.fillStyle = g; x.fillRect(0, 0, W, H); x.globalAlpha = .8;
+                for (let z = NZ - 1; z >= 0; z--) {
+                    const d = z / (NZ - 1), sc = 1 / (1 + 2.2 * d), tt = (1 - sc) / .6875, w = VS * sc, y0 = H * .97 - tt * H * .42, n = Math.ceil(W / 2 / w) + 2, fog = Math.min(.85, d * .9);
+                    for (let i = -n; i <= n; i++) {
+                        const sx = cx + i * w, u = (sx - cx) / W, s = (Math.sin(i * .32 + t * .8 + z * .35) + Math.sin(z * .55 - t * .6 + i * .12) + 2) / 4, lv = Math.floor(s * 4.999), h = lv * VS * .3 * sc, y = y0 + u * u * H * .5 * tt - h, tc = mx(mx(B1, B2, lv / 4), BG, fog);
+                        x.fillStyle = `rgb(${cs(mx(tc, BG, .45))})`; x.fillRect(sx - w / 2 + .5, y + w, w - 1, h + w * .5); x.fillStyle = `rgb(${cs(tc)})`; x.fillRect(sx - w / 2 + .5, y, w - 1, w)
+                    }
+                } x.globalAlpha = 1
+            }
+            const f = n => { if (!cv.isConnected) return; requestAnimationFrame(f); t += Math.min((n - last) / 1e3, .05) || 0; last = n; draw() }; if (RM) draw(); else requestAnimationFrame(f)
+        }
+
+        /* ---- Globe: dotted 3D globe with animated arcs, lit sphere, atmosphere and orbit ring ---- */
+        function Globe(cv) {
+            const x = cv.getContext("2d"), PI = Math.PI, V3 = (la, lo) => { la *= PI / 180; lo *= PI / 180; return [Math.cos(la) * Math.sin(lo), Math.sin(la), Math.cos(la) * Math.cos(lo)] }, dots = [], lines = [];
+            for (let la = -87; la <= 87; la += 3) { const n = Math.max(1, Math.round(120 * Math.cos(la * PI / 180))); for (let k = 0; k < n; k++) { const p = V3(la, k / n * 360 - 180), v = Math.sin(p[0] * 4.1 + 1) * Math.cos(p[1] * 3.7 - .5) + Math.sin(p[2] * 5.3 + p[0] * 2.2) * Math.sin(p[1] * 4.4 + p[2] * 1.7) + .5 * Math.sin(p[0] * 9 + p[1] * 7 + p[2] * 6); dots.push([p, v > .5]) } }
+            for (let la = -60; la <= 60; la += 30) { const l = []; for (let lo = 0; lo <= 360; lo += 6)l.push(V3(la, lo)); lines.push(l) } for (let lo = 0; lo < 360; lo += 30) { const l = []; for (let la = -90; la <= 90; la += 6)l.push(V3(la, lo)); lines.push(l) }
+            const city = [[40.7, -74], [51.5, -.1], [1.35, 103.8], [35.7, 139.7], [-23.5, -46.6], [25.2, 55.3], [-33.9, 151.2], [6.5, 3.4], [37.8, -122.4], [19, 72.9]].map(c => V3(c[0], c[1])),
+                AR = [[0, 1], [1, 2], [3, 8], [4, 7], [5, 9], [6, 3], [8, 0], [2, 6]].map((p, i) => ({ a: city[p[0]], b: city[p[1]], o: i * .85, w: Math.acos(Math.max(-1, Math.min(1, city[p[0]].reduce((s, v, j) => s + v * city[p[1]][j], 0)))) })),
+                TC = Math.cos(.35), TS = Math.sin(.35), LG = [-.5, .55, .65], LC = ["#2a3fd0", "#4d6bff", "#4FD6E0", "#c4f7ff"], cz = Math.cos(.45), sz = Math.sin(.45),
+                rp = a => { const px = Math.cos(a) * 1.4, X = px * cz, y = px * sz, Z = Math.sin(a) * 1.4; return [X, y * TC - Z * TS, y * TS + Z * TC] }, RP = Array.from({ length: 97 }, (_, i) => rp(i / 96 * PI * 2));
+            let W = 0, H = 0, t = RM ? 1.2 : 0, last = 0, yaw = .6, drag = 0, lx = 0;
+            const rot = p => { const c = Math.cos(yaw), s = Math.sin(yaw), X = p[0] * c + p[2] * s, Z = -p[0] * s + p[2] * c; return [X, p[1] * TC - Z * TS, p[1] * TS + Z * TC] },
+                arc = (A, u) => { const s = Math.sin(A.w) || 1, k1 = Math.sin((1 - u) * A.w) / s, k2 = Math.sin(u * A.w) / s, r = 1 + .22 * Math.sin(PI * u); return A.a.map((v, i) => (v * k1 + A.b[i] * k2) * r) };
+            const rs = () => { W = cv.clientWidth; H = cv.clientHeight; cv.width = W * D2; cv.height = H * D2 }; new ResizeObserver(rs).observe(cv); rs();
+            cv.style.cursor = "grab"; cv.style.touchAction = "pan-y"; cv.addEventListener("pointerdown", e => { drag = 1; lx = e.clientX; cv.setPointerCapture(e.pointerId) }); cv.addEventListener("pointermove", e => { if (drag) { yaw += (e.clientX - lx) * .01; lx = e.clientX } }); const up = () => drag = 0; cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up);
+            function draw() {
+                x.setTransform(D2, 0, 0, D2, 0, 0); x.clearRect(0, 0, W, H); const m = Math.min(W, H), cx = W / 2, cy = H / 2, R = m * .34, P = (q) => [cx + q[0] * R, cy - q[1] * R];
+                let g = x.createRadialGradient(cx, cy, R * .95, cx, cy, m * .5); g.addColorStop(0, "rgba(110,130,255,.42)"); g.addColorStop(.5, "rgba(91,108,255,.12)"); g.addColorStop(1, "rgba(91,108,255,0)"); x.fillStyle = g; x.fillRect(0, 0, W, H);
+                const ring = front => {
+                    x.lineWidth = 1; x.strokeStyle = `rgba(154,176,255,${front ? .5 : .22})`; x.beginPath(); let on = 0; for (let i = 0; i <= 96; i++) { const q = RP[i], f = q[2] >= 0 === front; if (!f) { on = 0; continue } const p = P(q); on ? x.lineTo(p[0], p[1]) : x.moveTo(p[0], p[1]); on = 1 } x.stroke();
+                    for (let s = 0; s < 3; s++) { const q = rp(t * .45 + s * 2.094); if (q[2] >= 0 !== front) continue; const p = P(q); x.fillStyle = "#fff"; x.shadowColor = "#9ab0ff"; x.shadowBlur = 12; x.beginPath(); x.arc(p[0], p[1], 2.6, 0, 7); x.fill(); x.shadowBlur = 0 }
+                };
+                ring(false);
+                const b = x.createRadialGradient(cx - R * .35, cy - R * .4, 0, cx, cy, R); b.addColorStop(0, "rgba(70,90,235,.55)"); b.addColorStop(1, "rgba(6,10,45,.8)"); x.fillStyle = b; x.beginPath(); x.arc(cx, cy, R, 0, 7); x.fill();
+                g = x.createRadialGradient(cx, cy, R * .78, cx, cy, R); g.addColorStop(0, "rgba(79,214,224,0)"); g.addColorStop(1, "rgba(122,141,255,.4)"); x.fillStyle = g; x.beginPath(); x.arc(cx, cy, R, 0, 7); x.fill();
+                x.lineWidth = .6; x.strokeStyle = "rgba(122,141,255,.14)"; for (const l of lines) { x.beginPath(); let on = 0; for (const v of l) { const q = rot(v); if (q[2] < 0) { on = 0; continue } const p = P(q); on ? x.lineTo(p[0], p[1]) : x.moveTo(p[0], p[1]); on = 1 } x.stroke() }
+                for (const [d, l] of dots) { const q = rot(d); if (q[2] < 0) continue; const lam = Math.max(0, q[0] * LG[0] + q[1] * LG[1] + q[2] * LG[2]), s = l ? 1.9 : 1.2; x.globalAlpha = l ? .25 + .75 * q[2] : (.1 + .3 * lam) * q[2] + .05; x.fillStyle = l ? LC[Math.min(3, Math.floor(lam * 4))] : "#3b49b8"; x.fillRect(cx + q[0] * R - s / 2, cy - q[1] * R - s / 2, s, s) } x.globalAlpha = 1;
+                x.lineWidth = 1.5; x.strokeStyle = "rgba(150,170,255,.55)"; x.beginPath(); x.arc(cx, cy, R, 0, 7); x.stroke();
+                city.forEach((c, i) => { const q = rot(c); if (q[2] < .05) return; const p = P(q), ph = (t * .8 + i * .37) % 1; x.strokeStyle = `rgba(79,214,224,${(1 - ph) * .6})`; x.lineWidth = 1; x.beginPath(); x.arc(p[0], p[1], 2 + ph * 10, 0, 7); x.stroke(); x.fillStyle = "#7ff0ff"; x.beginPath(); x.arc(p[0], p[1], 2.6, 0, 7); x.fill() });
+                x.lineCap = "round"; for (const A of AR) {
+                    const h = ((t + A.o) % 3.4) / 3.4 * 1.4, h0 = Math.max(0, h - .4), h1 = Math.min(1, h); if (h0 >= 1 || h1 <= h0) continue; let pv = null;
+                    for (let k = 0; k <= 20; k++) { const u = h0 + (h1 - h0) * k / 20, q = rot(arc(A, u)); if (pv && q[2] > 0 && pv[2] > 0) { const a = P(pv), c = P(q), f = k / 20; x.beginPath(); x.moveTo(a[0], a[1]); x.lineTo(c[0], c[1]); x.lineWidth = 4; x.strokeStyle = `rgba(79,214,224,${.12 * f})`; x.stroke(); x.lineWidth = 1 + 1.4 * f; x.strokeStyle = `rgba(${k > 14 ? "210,248,255" : "79,214,224"},${.2 + .8 * f})`; x.stroke() } pv = q }
+                    if (pv && pv[2] > 0 && h <= 1) { const p = P(pv); x.fillStyle = "#fff"; x.shadowColor = "#4FD6E0"; x.shadowBlur = 14; x.beginPath(); x.arc(p[0], p[1], 2.8, 0, 7); x.fill(); x.shadowBlur = 0 }
+                }
+                ring(true)
+            }
+            const f = n => { if (!cv.isConnected) return; requestAnimationFrame(f); const dt = Math.min((n - last) / 1e3, .05) || 0; last = n; t += dt; if (!drag) yaw += dt * .22; draw() }; if (RM) draw(); else requestAnimationFrame(f)
+        }
+
+        /* ---- Hexagonal Vault: hex grid lit by a soft light following the cursor ---- */
+        function Hex(host) {
+            const cv = document.createElement("canvas"); cv.className = "hv"; cv.setAttribute("aria-hidden", "true"); host.prepend(cv); const x = cv.getContext("2d"), R = 17, w = Math.sqrt(3) * R; let W = 0, H = 0, lx = 0, ly = 0, tx = 0, ty = 0, hv = 0, t = 0;
+            const rs = () => { W = host.clientWidth; H = host.clientHeight; cv.width = W * D2; cv.height = H * D2 }; new ResizeObserver(rs).observe(host); rs(); lx = tx = W / 2; ly = ty = H / 2;
+            const G = host.dataset.g, tg = G ? window : host; tg.addEventListener("pointermove", e => { const b = host.getBoundingClientRect(); tx = e.clientX - b.left; ty = e.clientY - b.top; hv = 1 }); (G ? document.documentElement : host).addEventListener("pointerleave", () => hv = 0);
+            (function f() {
+                if (!cv.isConnected) return; requestAnimationFrame(f); t += RM ? 0 : .008; if (!hv) { tx = W * (.5 + .4 * Math.sin(t)); ty = H * (.5 + .3 * Math.cos(t * 1.3)) } lx += (tx - lx) * .12; ly += (ty - ly) * .12;
+                x.setTransform(D2, 0, 0, D2, 0, 0); x.clearRect(0, 0, W, H); const c = cs(GC), g = x.createRadialGradient(lx, ly, 0, lx, ly, G ? 320 : 220); g.addColorStop(0, `rgba(${c},.14)`); g.addColorStop(1, `rgba(${c},0)`); x.fillStyle = g; x.fillRect(0, 0, W, H); x.lineWidth = 1;
+                for (let r = -1; r * R * 1.5 < H + R; r++)for (let q = -1; q * w < W + w; q++) {
+                    const cx = q * w + (r & 1 ? w / 2 : 0), cy = r * R * 1.5, fl = Math.max(0, 1 - Math.hypot(cx - lx, cy - ly) / (G ? 280 : 190)), f2 = fl * fl; x.beginPath(); for (let k = 0; k < 6; k++) { const a = Math.PI / 6 + k * Math.PI / 3, px = cx + Math.cos(a) * (R - 1.5), py = cy + Math.sin(a) * (R - 1.5); k ? x.lineTo(px, py) : x.moveTo(px, py) } x.closePath();
+                    x.strokeStyle = `rgba(${c},${(G ? .12 : .05) + .75 * f2})`; x.stroke(); if (f2 > .02) { x.fillStyle = `rgba(${c},${.14 * f2})`; x.fill() }
+                }
+            })()
+        }
+        { const hb = document.createElement("div"); hb.className = "hvbg"; hb.dataset.g = "1"; document.body.appendChild(hb); Hex(hb) }
+        {
+            const it = $("intro"); VoxelArc(it); Globe($("globe3")); const W = ["rug pull", "honeypot", "hidden mint", "unlocked liquidity", "sell tax"]; let i = 0;
+            const iv = setInterval(() => { const e = $("itm"); if (!e) return clearInterval(iv); morph(e, W[i % W.length], W[++i % W.length]) }, 2600);
+            const go = sc => { it.classList.add("off"); document.querySelector(".app").removeAttribute("inert"); setTimeout(() => { it.remove(); if (sc) document.querySelector(".grid").scrollIntoView({ behavior: RM ? "auto" : "smooth" }) }, 700) };
+            $("ienter").onclick = () => go(); $("isample").onclick = () => go(1); setTimeout(() => $("ienter").focus({ preventScroll: true }), 2300)
+        }
+        /* ---- 3D Category Overview (extruded radar) + 3D Risk Categories (extruded donut) ---- */
+        const V = { rd: C.map(() => 0), dd: C.map(() => 0), T: null, hov: -1 }, R3 = { yaw: .5 }, D3 = { yaw: .3 }, rgbOf = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+        function cam(W, H, yaw, pit, sc, F = 520) { const c = Math.cos(yaw), s = Math.sin(yaw), cp = Math.cos(pit), sp = Math.sin(pit); return (x, y, z) => { const X = x * c + z * s, Z = -x * s + z * c, Y = y * cp + Z * sp, D = Z * cp - y * sp, k = F / (F + D) * sc; return [W / 2 + X * k, H / 2 - Y * k, D] } }
+        function bind(cv, S) { let lx = 0; cv.style.cursor = "grab"; cv.style.touchAction = "pan-y"; cv.addEventListener("pointerdown", e => { S.drag = 1; lx = e.clientX; cv.setPointerCapture(e.pointerId); cv.style.cursor = "grabbing" }); cv.addEventListener("pointermove", e => { S.m = { x: e.offsetX, y: e.offsetY }; if (S.drag) { S.yaw += (e.clientX - lx) * .012; lx = e.clientX } }); const up = () => { S.drag = 0; cv.style.cursor = "grab" }; cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up); cv.addEventListener("pointerleave", () => S.m = null) }
+        function mk3d(t) {
+            V.T = t; $("radar").innerHTML = '<canvas id="r3" role="img" aria-label="3D radar of category scores" style="width:100%;display:block"></canvas>'; bind($("r3"), R3);
+            const dn = $("donut"); dn.classList.add("d3"); dn.style.background = "none"; const cv = document.createElement("canvas"); cv.id = "d3c"; cv.style.cssText = "position:absolute;inset:0;width:100%;height:100%"; dn.prepend(cv); bind(cv, D3); V.hov = -1
+        }
+        function drawRadar() {
+            const cv = $("r3"); if (!cv || !V.T) return; const W = cv.clientWidth; if (!W) return; const H = Math.round(W * .8); if (cv.width !== W * D2 || cv.height !== H * D2) { cv.width = W * D2; cv.height = H * D2; cv.style.height = H + "px" }
+            const x = cv.getContext("2d"); x.setTransform(D2, 0, 0, D2, 0, 0); x.clearRect(0, 0, W, H); const P = cam(W, H, R3.yaw, .95, W / 300), R = 100, TH = 30, ang = i => -Math.PI / 2 + i * Math.PI / 3, at = (r, y, i) => P(r * Math.cos(ang(i)), y, r * Math.sin(ang(i)));
+            const path = pts => { x.beginPath(); pts.forEach((p, i) => i ? x.lineTo(p[0], p[1]) : x.moveTo(p[0], p[1])); x.closePath() };
+            x.lineWidth = 1;[1 / 3, 2 / 3, 1].forEach(f => { path(C.map((_, i) => at(R * f, 0, i))); if (f === 1) { x.fillStyle = "rgba(91,108,255,.07)"; x.fill() } x.strokeStyle = "#2a3380"; x.stroke() });
+            const c0 = P(0, 0, 0); C.forEach((_, i) => { const p = at(R, 0, i); x.beginPath(); x.moveTo(c0[0], c0[1]); x.lineTo(p[0], p[1]); x.stroke() });
+            const r = V.rd.map(v => Math.max(.05, v) * R), Fl = C.map((_, i) => at(r[i], 0, i)), Tp = C.map((_, i) => at(r[i], TH, i));
+            C.map((_, i) => { const j = (i + 1) % 6, q = [Fl[i], Fl[j], Tp[j], Tp[i]]; return { q, i, d: q.reduce((m, p) => m + p[2], 0) / 4 } }).sort((a, b) => b.d - a.d).forEach(s => { path(s.q); x.fillStyle = `rgba(122,77,255,${.2 + .12 * (s.i % 2)})`; x.fill(); x.strokeStyle = "rgba(192,122,255,.55)"; x.stroke() });
+            path(Tp); x.fillStyle = "rgba(150,110,255,.5)"; x.fill(); x.strokeStyle = "#c07aff"; x.lineWidth = 2; x.stroke(); x.lineWidth = 1; x.textAlign = "center";
+            C.forEach((n, i) => {
+                x.strokeStyle = "rgba(192,122,255,.7)"; x.beginPath(); x.moveTo(Fl[i][0], Fl[i][1]); x.lineTo(Tp[i][0], Tp[i][1]); x.stroke(); x.fillStyle = COL[i]; x.shadowColor = COL[i]; x.shadowBlur = 8; x.beginPath(); x.arc(Tp[i][0], Tp[i][1], 3.5, 0, 7); x.fill(); x.shadowBlur = 0;
+                x.fillStyle = "#fff"; x.font = "bold 11px 'Segoe UI',sans-serif"; x.fillText(V.T.p[i], Tp[i][0], Tp[i][1] - 9); const L = at(R * 1.2, 0, i); x.fillStyle = "#cfd3ff"; x.font = "10px 'Segoe UI',sans-serif"; x.fillText(n.split(" ")[0], L[0], L[1] + 3)
+            })
+        }
+        function drawDonut() {
+            const cv = $("d3c"); if (!cv || !V.T) return; const W = cv.clientWidth, H = cv.clientHeight; if (!W) return; if (cv.width !== W * D2 || cv.height !== H * D2) { cv.width = W * D2; cv.height = H * D2 }
+            const x = cv.getContext("2d"); x.setTransform(D2, 0, 0, D2, 0, 0); x.clearRect(0, 0, W, H); const tot = V.dd.reduce((a, b) => a + b, 0); if (tot < .5) return;
+            const sc = Math.min(W / 190, H / 170), P = cam(W, H, D3.yaw, 1, sc), R1 = 66, R0 = 38, hh = i => 6 + 28 * V.rd[i], S = []; let a = -Math.PI / 2;
+            V.dd.forEach((v, i) => { const da = v / tot * Math.PI * 2, g = Math.min(.03, da * .3) / 2; if (da > .02) S.push({ i, a0: a + g, a1: a + da - g, n: Math.max(2, Math.ceil(da / 6.283 * 72)) }); a += da });
+            let hov = -1; if (D3.m) for (const s of S) { const p2 = new Path2D(), h = hh(s.i); for (let j = 0; j < s.n; j++) { const ta = s.a0 + (s.a1 - s.a0) * j / s.n, tb = s.a0 + (s.a1 - s.a0) * (j + 1) / s.n;[[R1, ta], [R1, tb], [R0, tb], [R0, ta]].forEach(([r, t], k) => { const p = P(r * Math.cos(t), h, r * Math.sin(t)); k ? p2.lineTo(p[0], p[1]) : p2.moveTo(p[0], p[1]) }); p2.closePath() } if (x.isPointInPath(p2, D3.m.x * D2, D3.m.y * D2)) { hov = s.i; break } }
+            if (hov !== V.hov) { V.hov = hov; const b = $("donut").querySelector("b"), sm = $("donut").querySelector("small"); if (b) { b.textContent = hov >= 0 ? V.T.p[hov] : V.T.p.reduce((p, q) => p + q, 0); sm.textContent = hov >= 0 ? C[hov] : "Total Raw Points" } }
+            const c0 = P(0, 0, 0); x.fillStyle = "rgba(0,0,0,.28)"; x.beginPath(); x.ellipse(c0[0], c0[1] + 4, R1 * sc * 1.05, R1 * sc * Math.sin(1) * 1.0, 0, 0, 7); x.fill();
+            const F = [], ys = D3.yaw, sy = Math.sin(ys), cy = Math.cos(ys);
+            for (const s of S) {
+                const i = s.i, hv = i === hov, h = hh(i) + (hv ? 5 : 0), am = (s.a0 + s.a1) / 2, ex = hv ? 9 : 0, ox = Math.cos(am) * ex, oz = Math.sin(am) * ex, br = hv ? 1.2 : 1, rgb = rgbOf(COL[i]), pt = (r, t, y) => P(r * Math.cos(t) + ox, y, r * Math.sin(t) + oz);
+                const add = (pts, sh) => F.push({ pts, c: `rgb(${rgb.map(v => Math.min(255, Math.round(v * Math.max(.3, Math.min(1, sh)) * br))).join()})`, d: pts.reduce((m, p) => m + p[2], 0) / pts.length });
+                for (let j = 0; j < s.n; j++) {
+                    const ta = s.a0 + (s.a1 - s.a0) * j / s.n, tb = s.a0 + (s.a1 - s.a0) * (j + 1) / s.n, zn = Math.sin((ta + tb) / 2 - ys); add([pt(R1, ta, h), pt(R1, tb, h), pt(R0, tb, h), pt(R0, ta, h)], 1);
+                    if (zn < .15) add([pt(R1, ta, 0), pt(R1, tb, 0), pt(R1, tb, h), pt(R1, ta, h)], .55 - .3 * zn); if (zn > -.15) add([pt(R0, ta, 0), pt(R0, tb, 0), pt(R0, tb, h), pt(R0, ta, h)], .55 + .3 * zn)
+                }
+                [[s.a0, 1], [s.a1, -1]].forEach(([t, sg]) => { const nx = sg * Math.sin(t), nz = -sg * Math.cos(t), zn = -nx * sy + nz * cy; if (zn < .15) add([pt(R0, t, 0), pt(R1, t, 0), pt(R1, t, h), pt(R0, t, h)], .55 - .3 * zn) })
+            }
+            F.sort((p, q) => q.d - p.d).forEach(f => { x.beginPath(); f.pts.forEach((p, k) => k ? x.lineTo(p[0], p[1]) : x.moveTo(p[0], p[1])); x.closePath(); x.fillStyle = f.c; x.fill(); x.strokeStyle = f.c; x.lineWidth = .6; x.stroke() })
+        }
+        (function loop3() {
+            requestAnimationFrame(loop3); if (!V.T) return; V.rd = V.rd.map((v, i) => v + (V.T.p[i] / CAP[i] - v) * .08); V.dd = V.dd.map((v, i) => v + (V.T.p[i] - v) * .08);
+            if (!RM) { if (!R3.drag && !R3.m) R3.yaw += .004; if (!D3.drag && !D3.m) D3.yaw += .004 } drawRadar(); drawDonut()
+        })();
+        /* ---- Sidebar pages: History, Bookmarks, API Docs, Settings ---- */
+        const LS = { g(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d } catch (e) { return d } }, s(k, v) { try { localStorage.setItem(k, JSON.stringify(v)) } catch (e) { } } }, esc = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+        let curV = "home", curK = "honeypot", BM = LS.g("rs_bm", null) || [{ k: "benign", n: "Uniswap V2", s: "UNI", sc: 6.1 }], ST = Object.assign({ chain: "BSC", thr: 60, fx: true, key: "rs_live_8f3a91c2d7e04b65a9f2" }, LS.g("rs_st", {})), hf = { q: "", l: "All" }, at = "curl", snip = "", rev = 0, clrArm = 0, tmr = 0;
+        hist.push(["unlocked", "MoonVault", "(MVLT)", "10/08/2026, 06:40 PM", 71.4], ["honeypot", "RugKing", "(RUGK)", "10/08/2026, 05:12 PM", 96.2], ["benign", "StableLP", "(SLP)", "10/07/2026, 11:03 AM", 9.8], ["unlocked", "DogeMoon", "(DMN)", "10/07/2026, 09:31 AM", 55]);
+        const isBM = n => BM.some(b => b.n === n), tgl = o => { const i = BM.findIndex(b => b.n === o.n); i >= 0 ? BM.splice(i, 1) : BM.push(o); LS.s("rs_bm", BM) }, hk = h => h[0] == "safe" ? "honeypot" : h[0], hbm = h => ({ k: hk(h), n: h[1], s: h[2].slice(1, -1), sc: h[4] });
+        function toast(m) { const e = $("toast"); e.textContent = m; e.classList.add("on"); clearTimeout(tmr); tmr = setTimeout(() => e.classList.remove("on"), 1800) }
+        function copy(t) { const fb = () => { const a = document.createElement("textarea"); a.value = t; document.body.appendChild(a); a.select(); let ok = 0; try { ok = document.execCommand("copy") } catch (e) { } a.remove(); toast(ok ? "Copied" : "Copy failed") }; try { navigator.clipboard.writeText(t).then(() => toast("Copied"), fb) } catch (e) { fb() } }
+        function bmBtn(t) { $("sum").querySelector(".tok").insertAdjacentHTML("beforeend", `<button class="ghost sm" data-bmcur="1" style="margin-left:auto">${isBM(t.n) ? "★ Saved" : "☆ Save"}</button>`) }
+        function view(v) { curV = v; document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.v === v)); const home = v === "home" || v === "scan"; $("v-home").hidden = !home;["history", "bookmarks", "api", "settings"].forEach(n => $("v-" + n).hidden = v !== n); ({ history: rHist, bookmarks: rBm, api: rApi, settings: rSet })[v]?.(); scrollTo(0, 0); if (v === "scan") { $("addr").scrollIntoView({ block: "center" }); $("addr").focus({ preventScroll: true }) } }
+        document.querySelectorAll("nav a").forEach(a => { a.tabIndex = 0; a.setAttribute("role", "button"); a.onclick = () => view(a.dataset.v); a.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); view(a.dataset.v) } } });
+        function rHist() { $("v-history").innerHTML = `<section class="card"><h3>Scan History <small style="color:var(--mut);font-weight:400">· ${hist.length} scans</small></h3><div class="vbar"><input id="hq" placeholder="Search token or symbol…" aria-label="Search history" value="${esc(hf.q)}"><div class="tabs" style="margin:0">${["All", "CRITICAL", "HIGH", "MEDIUM", "LOW"].map(l => `<button class="${hf.l == l ? "on" : ""}" data-hl="${l}">${l == "All" ? "All" : l[0] + l.slice(1).toLowerCase()}</button>`).join("")}</div></div><div class="tw"><table><thead><tr><th>Token</th><th>Risk</th><th>Score</th><th>Scanned</th><th></th></tr></thead><tbody id="hbody"></tbody></table></div></section>`; $("hq").oninput = e => { hf.q = e.target.value; hb() }; hb() }
+        function hb() { const q = hf.q.toLowerCase(); $("hbody").innerHTML = hist.map((h, i) => [h, i]).filter(([h]) => (hf.l == "All" || lvl(h[4]) == hf.l) && (h[1] + h[2]).toLowerCase().includes(q)).map(([h, i]) => { const l = lvl(h[4]); return `<tr><td><b>${esc(h[1])}</b> <span style="color:var(--mut)">${esc(h[2])}</span></td><td><span class="badge ${l}">${l}</span></td><td style="color:${colr(l)}">${h[4]}/100${h[4] >= ST.thr ? ' <span title="At or above your alert threshold">⚠</span>' : ""}</td><td style="color:var(--mut)">${h[3]}</td><td style="white-space:nowrap"><button class="ghost sm" data-ho="${i}">View report</button> <button class="ghost sm" data-hb="${i}" aria-label="Toggle bookmark">${isBM(h[1]) ? "★" : "☆"}</button></td></tr>` }).join("") || `<tr><td colspan="5" style="color:var(--mut)">No scans match.</td></tr>` }
+        function rBm() { $("v-bookmarks").innerHTML = `<section class="card"><h3>Bookmarks <small style="color:var(--mut);font-weight:400">· ${BM.length} saved</small></h3>${BM.length ? `<div class="bmg">${BM.map((b, i) => { const l = lvl(b.sc); return `<div class="bmc"><div class="tok"><h2 style="font-size:17px">${esc(b.n)} <span>(${esc(b.s)})</span></h2></div><div style="display:flex;align-items:center;gap:10px;margin:10px 0"><span class="badge ${l}">${l}</span><b style="color:${colr(l)}">${b.sc}/100</b></div><div class="trk"><i style="width:${b.sc}%;background:${colr(l)}"></i></div><div style="display:flex;gap:8px;margin-top:14px"><button class="btn sm2" data-bo="${i}">Open report</button><button class="ghost sm" data-br="${i}">Remove</button></div></div>` }).join("")}</div>` : `<p style="color:var(--mut)">No bookmarks yet. Use ☆ Save on a report or in Scan History.</p>`}</section>` }
+        const EP = [["POST", "/v1/scan", "Scan a token contract"], ["GET", "/v1/scan/{id}", "Fetch a finished scan"], ["GET", "/v1/history", "List recent scans"], ["GET", "/v1/tokens/{address}/score", "Latest risk score for a token"]],
+            snips = () => { const a = "0x2222222222222222222222222222222222222222", k = ST.key; return { curl: `curl -X POST https://api.rugscan.example/v1/scan \\\n  -H "Authorization: Bearer ${k}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"address":"${a}","chain":"bsc"}'`, js: `const res = await fetch("https://api.rugscan.example/v1/scan", {\n  method: "POST",\n  headers: {\n    Authorization: "Bearer ${k}",\n    "Content-Type": "application/json",\n  },\n  body: JSON.stringify({ address: "${a}", chain: "bsc" }),\n});\nconsole.log(await res.json());`, py: `import requests\n\nres = requests.post(\n    "https://api.rugscan.example/v1/scan",\n    headers={"Authorization": "Bearer ${k}"},\n    json={"address": "${a}", "chain": "bsc"},\n)\nprint(res.json())` } },
+            resp = k => { const t = S[k]; return JSON.stringify({ address: t.a, chain: "bsc", token: { name: t.n, symbol: t.s }, score: { final: t.sc, rule: t.rule, ml_probability: t.ml }, level: lvl(t.sc), verdict: t.v, flags: t.f.slice(0, 3).map(f => ({ severity: f[0], code: f[1], points: f[3] })) }, null, 2) };
+        function rApi() {
+            snip = snips()[at]; $("v-api").innerHTML = `<div class="grid"><div class="col"><section class="card"><h3>Endpoints</h3><p style="color:var(--mut);margin:0 0 10px">Base URL <code>https://api.rugscan.example</code> · header <code>Authorization: Bearer &lt;key&gt;</code></p><div class="tw"><table><thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead><tbody>${EP.map(e => `<tr><td><span class="badge ${e[0] == "POST" ? "MEDIUM" : "LOW"}">${e[0]}</span></td><td><code>${e[1]}</code></td><td>${e[2]}</td></tr>`).join("")}</tbody></table></div></section>
+<section class="card"><h3>Quick start</h3><div class="vbar"><div class="tabs" style="margin:0">${[["curl", "cURL"], ["js", "JavaScript"], ["py", "Python"]].map(a => `<button class="${at == a[0] ? "on" : ""}" data-tab="${a[0]}">${a[1]}</button>`).join("")}</div><button class="ghost sm" data-cp="snip" style="margin-left:auto">Copy</button></div><pre class="code">${esc(snip)}</pre></section>
+<section class="card"><h3>Example response</h3><pre class="code">${esc(resp("honeypot"))}</pre></section></div>
+<div class="col"><section class="card"><h3>Try it <small style="color:var(--mut);font-weight:400">· mock provider</small></h3><div class="vbar"><input id="try-a" placeholder="0x… token address" aria-label="Token address"><button class="btn sm2" data-run="1">Run</button></div><pre class="code" id="try-o">// Response appears here</pre></section>
+<section class="card"><h3>Rate limits</h3><div class="tw"><table style="min-width:0"><thead><tr><th>Plan</th><th>Requests / min</th><th>Scans / day</th></tr></thead><tbody><tr><td>Free</td><td>10</td><td>100</td></tr><tr><td>Pro</td><td>120</td><td>5,000</td></tr><tr><td>Enterprise</td><td>Custom</td><td>Unlimited</td></tr></tbody></table></div></section></div></div>`}
+        function sv(q) { LS.s("rs_st", ST); applyST(); if (!q) toast("Settings saved") }
+        function applyST() { document.querySelector(".scan select").value = ST.chain; document.querySelector(".top .chip").textContent = ({ BSC: "BSC (BNB Smart Chain)", ETH: "Ethereum", Base: "Base" })[ST.chain]; const h = document.querySelector(".hvbg"); if (h) h.style.display = ST.fx ? "" : "none" }
+        function rSet() {
+            $("v-settings").innerHTML = `<section class="card"><h3>Settings</h3>
+<div class="srow"><div><b>Default chain</b><small>Used by the scanner form</small></div><select id="st-ch" aria-label="Default chain">${["BSC", "ETH", "Base"].map(c => `<option${ST.chain == c ? " selected" : ""}>${c}</option>`).join("")}</select></div>
+<div class="srow"><div><b>Alert threshold</b><small>Flag scans at or above this score in history · <span id="st-tv">${ST.thr}</span>/100</small></div><input id="st-th" type="range" min="0" max="100" value="${ST.thr}" style="width:200px" aria-label="Alert threshold"></div>
+<div class="srow"><div><b>Background effects</b><small>Hexagonal grid behind the dashboard</small></div><label class="sw"><input id="st-fx" type="checkbox" aria-label="Background effects"${ST.fx ? " checked" : ""}><i></i></label></div>
+<div class="srow"><div><b>API key</b><small>${rev ? esc(ST.key) : esc(ST.key.slice(0, 8)) + "••••••••••••"}</small></div><div style="display:flex;gap:8px"><button class="ghost sm" data-reveal="1">${rev ? "Hide" : "Reveal"}</button><button class="ghost sm" data-cp="key">Copy</button><button class="ghost sm" data-regen="1">Regenerate</button></div></div>
+<div class="srow" style="border:0"><div><b>Clear scan history</b><small>Removes all ${hist.length} saved scans</small></div><button class="ghost sm" data-clr="1" style="border-color:#ff4a5e88;color:#ffb3bb">Clear history</button></div></section>`;
+            $("st-ch").onchange = e => { ST.chain = e.target.value; sv() }; $("st-th").oninput = e => { ST.thr = +e.target.value; $("st-tv").textContent = ST.thr; sv(1) }; $("st-fx").onchange = e => { ST.fx = e.target.checked; sv() }
+        }
+        document.addEventListener("click", e => {
+            const b = e.target.closest("[data-hl],[data-ho],[data-hb],[data-bo],[data-br],[data-bmcur],[data-tab],[data-cp],[data-run],[data-reveal],[data-regen],[data-clr]"); if (!b) return; const d = b.dataset, jump = () => $("sum").scrollIntoView({ behavior: RM ? "auto" : "smooth", block: "center" });
+            if (d.hl) { hf.l = d.hl; rHist() }
+            if (d.ho) { show(hk(hist[d.ho])); jump() }
+            if (d.hb) { tgl(hbm(hist[d.hb])); hb() }
+            if (d.bo) { show(BM[d.bo].k); jump() }
+            if (d.br) { BM.splice(d.br, 1); LS.s("rs_bm", BM); rBm() }
+            if (d.bmcur) { const t = S[curK]; tgl({ k: curK, n: t.n, s: t.s, sc: t.sc }); b.textContent = isBM(t.n) ? "★ Saved" : "☆ Save" }
+            if (d.tab) { at = d.tab; rApi() }
+            if (d.cp) copy(d.cp == "key" ? ST.key : snip);
+            if (d.run) { const v = $("try-a").value.trim(), o = $("try-o"); if (!/^0x[a-fA-F0-9]{40}$/.test(v)) { o.textContent = JSON.stringify({ error: "invalid_address", message: "Expected 0x followed by 40 hex characters" }, null, 2); return } o.textContent = "…"; setTimeout(() => { const k = ["honeypot", "unlocked", "benign"][parseInt(v.slice(-2), 16) % 3]; o.textContent = resp(k).replace(S[k].a, v) }, 600) }
+            if (d.reveal) { rev = !rev; rSet() }
+            if (d.regen) { ST.key = "rs_live_" + [...Array(20)].map(() => Math.floor(Math.random() * 16).toString(16)).join(""); sv(); rSet() }
+            if (d.clr) { if (!clrArm) { clrArm = 1; b.textContent = "Click again to confirm"; setTimeout(() => { clrArm = 0; if (b.isConnected) b.textContent = "Clear history" }, 3000) } else { clrArm = 0; hist.length = 0; drawHist(); rSet(); toast("History cleared") } }
+        });
+        applyST();
+        /* ---- SpotlightCard (React Bits) ported to vanilla JS: pointer-lit cards that share one light by proximity ---- */
+        const SP = new Set(), SEL = ".card,.side-card,.pcc,.bmc", cl = (v, a, b) => Math.min(b, Math.max(a, v));
+        function falloff(color, softness) { const soft = cl(softness, 0, 1), core = Math.pow(1 - soft, 1.5) * .85, stop = (a, at) => `color-mix(in srgb, ${color} ${(a * 100).toFixed(2)}%, transparent) ${(at * 100).toFixed(2)}%`, list = [stop(1, 0)]; for (let i = 0; i <= 14; i++) { const t = core + (1 - core) * i / 14, g = (t - core) / (1 - core), sm = 1 - g * g * (3 - 2 * g), gl = Math.exp(-4.6 * g * g) * (1 - Math.pow(g, 6)); list.push(stop(sm + (gl - sm) * soft, t)) } return list.join(", ") }
+        function Spot(root, o) {
+            if (root.classList.contains("spl")) return; o = Object.assign({ color: "#8a9bff", intensity: .22, size: 260, softness: .7, shape: "circle", edge: .8, prox: 90, smooth: .3, flare: 1, ambient: matchMedia("(hover:none)").matches }, o);
+            const mk = c => { const s = document.createElement("span"); s.className = c; s.setAttribute("aria-hidden", "true"); return s }, L = mk("spl-l"), B = mk("spl-b"), E = mk("spl-e"), attach = () => { if (!L.isConnected) root.prepend(L); if (!B.isConnected) root.append(B, E) }; root.classList.add("spl"); attach();
+            const st = { x: 0, y: 0, pr: 0, fl: 0, tm: Math.random() * 60, pressed: 0, vis: true }, pt = { x: 0, y: 0, on: 0 }, dr = { l: "", e: "" }; let raf = 0, last = 0, ck = "", fill = "", rim = "";
+            const grad = (sz, x, y, stops) => o.shape === "beam" ? `radial-gradient(${(sz * .55).toFixed(1)}px ${Math.max(sz * .6, y + sz * .55).toFixed(1)}px at ${x.toFixed(1)}px 0px, ${stops})` : `radial-gradient(circle ${sz.toFixed(1)}px at ${x.toFixed(1)}px ${y.toFixed(1)}px, ${stops})`;
+            function paint() { const k = o.color + "|" + o.softness; if (k !== ck) { ck = k; fill = falloff(o.color, o.softness); rim = falloff(o.color, 1) } const sz = o.size * (1 + .2 * st.fl), bo = 1 + .7 * st.fl, f = grad(sz, st.x, st.y, fill), r = grad(sz * .6, st.x, o.shape === "beam" ? 0 : st.y, rim); if (f !== dr.l) { dr.l = f; L.style.background = f } if (r !== dr.e) { dr.e = r; E.style.background = r } L.style.opacity = Math.min(1, st.pr * o.intensity * bo); E.style.opacity = Math.min(1, st.pr * o.edge * bo) }
+            function tick(now) {
+                raf = 0; if (!root.isConnected || !root.offsetWidth) return; const dt = Math.min(.05, Math.max(.001, (now - last) / 1e3)); last = now; const rc = root.getBoundingClientRect(); st.vis = rc.bottom > 0 && rc.top < innerHeight; let tx = st.x, ty = st.y, tg = 0;
+                if (pt.on) { tx = pt.x - rc.left; ty = pt.y - rc.top; const gap = Math.hypot(Math.max(0, -tx, tx - rc.width), Math.max(0, -ty, ty - rc.height)); if (gap === 0) tg = 1; else if (o.prox > 0) tg = Math.pow(Math.max(0, 1 - gap / o.prox), 2) }
+                if (tg < .6 && o.ambient && st.vis) { if (!RM) st.tm += dt; const d = .6 - tg; tx += (rc.width * (.5 + .34 * Math.sin(st.tm * .43)) - tx) * (d / .6); ty += (rc.height * (.5 + .3 * Math.sin(st.tm * .61 + 1.3)) - ty) * (d / .6); tg = .6 }
+                if (st.pr < .02 && tg > 0 && !o.ambient) { st.x = tx; st.y = ty }
+                const fo = RM || o.smooth === 0 ? 1 : 1 - Math.exp(-dt / (.015 + o.smooth * .22)); st.x += (tx - st.x) * fo; st.y += (ty - st.y) * fo; const fa = RM ? 1 : 1 - Math.exp(-dt / (tg > st.pr ? .1 : .32)); st.pr += (tg - st.pr) * fa; if (Math.abs(tg - st.pr) < .002) st.pr = tg;
+                const pr = st.pressed && o.flare && !RM ? 1 : 0; st.fl += (pr - st.fl) * (1 - Math.exp(-dt / (pr ? .05 : .28))); if (Math.abs(pr - st.fl) < .002) st.fl = pr; paint();
+                const mv = Math.abs(tx - st.x) > .1 || Math.abs(ty - st.y) > .1; if (mv || st.pr !== tg || st.fl !== pr || (o.ambient && st.vis && !RM)) raf = requestAnimationFrame(tick)
+            }
+            const wake = () => { if (raf) return; last = performance.now(); raf = requestAnimationFrame(tick) };
+            const I = { root, o, attach, move(e) { pt.x = e.clientX; pt.y = e.clientY; pt.on = 1; if (root.offsetWidth) wake() }, out(e) { if (e.relatedTarget) return; pt.on = 0; wake() }, up(e) { if (e.pointerType !== "mouse") pt.on = 0; if (!st.pressed && e.pointerType === "mouse") return; st.pressed = 0; wake() }, scr() { if (pt.on || st.pr > 0) wake() } };
+            root.addEventListener("pointerdown", e => { pt.x = e.clientX; pt.y = e.clientY; pt.on = 1; st.pressed = 1; wake() }); SP.add(I); wake(); return I
+        }
+        { const each = f => SP.forEach(i => i.root.isConnected ? f(i) : SP.delete(i)); addEventListener("pointermove", e => each(i => i.move(e))); addEventListener("pointerup", e => each(i => i.up(e))); addEventListener("pointercancel", e => each(i => i.up(e))); addEventListener("scroll", () => each(i => i.scr()), { capture: true, passive: true }); document.addEventListener("pointerout", e => each(i => i.out(e))) }
+        const heroSp = Spot(document.querySelector(".hero"), { shape: "beam", size: 420, intensity: .3 }), sumSp = Spot($("sum")); document.querySelectorAll(SEL).forEach(c => Spot(c));
+        function spotSum() { sumSp.attach(); const c = `rgb(${cs(mx(GT, [138, 155, 255], .5))})`; SP.forEach(i => i.o.color = c) }
+        { const ob = new MutationObserver(() => document.querySelectorAll(SEL).forEach(c => Spot(c)));["history", "bookmarks", "api", "settings"].forEach(n => ob.observe($("v-" + n), { childList: true })) }
+        function cnt(el, to, dec) { const from = parseFloat(el.dataset.v || 0); el.dataset.v = to; if (RM) { el.textContent = to.toFixed(dec); return } const t0 = performance.now(); (function f(n) { const u = Math.min(1, (n - t0) / 700), e = 1 - Math.pow(1 - u, 3); el.textContent = (from + (to - from) * e).toFixed(dec); if (u < 1) requestAnimationFrame(f) })(t0) }
+        function kpi() { const n = hist.length, fl = hist.filter(h => h[4] >= 60).length, sf = hist.filter(h => h[4] < 30).length, av = n ? hist.reduce((a, h) => a + h[4], 0) / n : 0;[["scans", n, 0], ["flag", fl, 0], ["avg", av, 1], ["safe", sf, 0]].forEach(([k, v, d]) => cnt(document.querySelector(`[data-kpi="${k}"]`), v, d)) }
+        { const _dh = drawHist; drawHist = function () { _dh(); kpi() } }
+        document.addEventListener("pointermove", e => { const c = e.target.closest && e.target.closest(".card,aside"); if (!c) return; const b = c.getBoundingClientRect(); c.style.setProperty("--mx", e.clientX - b.left + "px"); c.style.setProperty("--my", e.clientY - b.top + "px") });
+        drawHist(); show("honeypot");
+    </script>
+</body>
+
+</html>
